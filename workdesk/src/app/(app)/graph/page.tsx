@@ -23,7 +23,6 @@ import { buildFlowGraph } from "@/components/graph/layout";
 import { MemberNode, SetNode, ArtifactNode, NODE_COLORS } from "@/components/graph/graph-nodes";
 import { FloatingCanvas } from "@/components/graph/floating-canvas";
 import { LoadingState, ErrorState } from "@/components/ui/states";
-import { Button } from "@/components/ui/button";
 import type { GraphNode } from "@/modules/relationships/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,13 +341,7 @@ function GraphInner({ search }: { search: string }) {
     </div>
   );
 
-  if (!graphData || graphData.nodes.length === 0) return (
-    <div className="flex h-full flex-col items-center justify-center gap-4">
-      <p className="text-text-secondary text-sm">No data to display yet.</p>
-      <p className="text-text-secondary/60 text-xs">Create sets and artifacts in your Archive to see them here.</p>
-      <Button onClick={() => router.push("/archive")}>Go to Archive</Button>
-    </div>
-  );
+  const isEmpty = !graphData || graphData.nodes.length === 0;
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -392,6 +385,24 @@ function GraphInner({ search }: { search: string }) {
           Drag to select · Ctrl+click to add
         </span>
       </div>
+
+      {/* ── Empty state overlay (toolbar still visible so user can switch to team view) ── */}
+      {isEmpty && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 5,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 12, pointerEvents: "none",
+        }}>
+          <p style={{ fontSize: 14, color: "#8b949e", fontFamily: "Inter, sans-serif" }}>
+            {teamView ? "No team members have published to the Library yet." : "No data to display yet."}
+          </p>
+          {!teamView && (
+            <p style={{ fontSize: 12, color: "#484f58", fontFamily: "Inter, sans-serif" }}>
+              Create sets and artifacts in your Archive, or enable Team View to see the Library.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── React Flow canvas ── */}
       <ReactFlow

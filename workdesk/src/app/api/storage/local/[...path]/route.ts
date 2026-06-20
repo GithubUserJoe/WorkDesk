@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
 import { requireSession } from "@/lib/session";
+import { verifyContentKeyReference, InvalidContentKeyError } from "@/modules/archive/services/archiveService";
 import { fail } from "@/types/common";
 
 // Project root is three levels above src/app/api/storage/local/[...path]
@@ -87,9 +88,21 @@ export async function GET(
     const session = await requireSession();
     const { path: segments } = await params;
 
-    // Ownership check: segment[1] must be the session userId.
-    if (!segments || segments.length < 3 || segments[0] !== "archives" || segments[1] !== session.userId) {
+    if (!segments || segments.length < 3 || segments[0] !== "archives") {
       return new NextResponse("Forbidden", { status: 403 });
+    }
+
+    // Build the content key from the path segments and verify DB linkage.
+    // This allows cross-user access for PUBLIC and share-granted artifacts
+    // without restricting by the file owner's userId in the path.
+    const contentKey = segments.join("/");
+    try {
+      await verifyContentKeyReference(session.userId, contentKey);
+    } catch (e) {
+      if (e instanceof InvalidContentKeyError) {
+        return new NextResponse("Forbidden", { status: 403 });
+      }
+      throw e;
     }
 
     const filePath = resolveKey(segments);

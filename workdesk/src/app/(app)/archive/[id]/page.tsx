@@ -15,7 +15,7 @@ import {
 import { useRecordOpen } from "@/modules/activity/hooks";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api-client";
-import { ArtifactType, Visibility } from "@/lib/enums";
+import { ArtifactType } from "@/lib/enums";
 import { TagPicker } from "@/components/archive/tag-picker";
 import { RichTextEditor, CommitModal, EditorToolbar } from "@/components/archive/rich-text-editor";
 import type { Editor } from "@tiptap/react";
@@ -73,7 +73,6 @@ export default function ArtifactWorkspace({ params }: { params: Promise<{ id: st
 
   // Right panel editable fields
   const [descDraft, setDescDraft] = useState("");
-  const [visibilityDraft, setVisibilityDraft] = useState<Visibility>(Visibility.PRIVATE);
 
   // Dialogs
   const [moveOpen, setMoveOpen] = useState(false);
@@ -96,7 +95,6 @@ export default function ArtifactWorkspace({ params }: { params: Promise<{ id: st
       initializedRef.current = true;
       setTitleDraft(artifact.title);
       setDescDraft(artifact.description ?? "");
-      setVisibilityDraft(artifact.visibility);
     }
   }, [artifact]);
 
@@ -163,11 +161,6 @@ export default function ArtifactWorkspace({ params }: { params: Promise<{ id: st
   async function handleDescBlur() {
     if (!artifact || descDraft === (artifact.description ?? "")) return;
     await updateArtifact.mutateAsync({ id, payload: { description: descDraft || null } });
-  }
-
-  async function handleVisibilityChange(v: Visibility) {
-    setVisibilityDraft(v);
-    await updateArtifact.mutateAsync({ id, payload: { visibility: v } });
   }
 
   // ── Restore version ────────────────────────────────────────────────────────
@@ -423,20 +416,10 @@ export default function ArtifactWorkspace({ params }: { params: Promise<{ id: st
             <MetaRow icon={<FileText size={12} />} label="Type">
               <span className="capitalize text-[12px] text-text-primary">{artifact.type.toLowerCase()}</span>
             </MetaRow>
-            <MetaRow icon={<Eye size={12} />} label="Visibility">
-              {isOwner ? (
-                <select
-                  value={visibilityDraft}
-                  onChange={e => handleVisibilityChange(e.target.value as Visibility)}
-                  className="text-[12px] bg-transparent text-text-primary outline-none capitalize border-b border-transparent hover:border-border-default focus:border-primary transition-colors cursor-pointer"
-                >
-                  {Object.values(Visibility).map(v => (
-                    <option key={v} value={v} className="bg-surface-elevated capitalize">{v.toLowerCase()}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="capitalize text-[12px] text-text-primary">{artifact.visibility.toLowerCase()}</span>
-              )}
+            <MetaRow icon={<Eye size={12} />} label="Access">
+              <span className="text-[12px] text-text-primary capitalize">
+                {artifact.visibility === "PUBLIC" ? "public (library)" : artifact.visibility === "SHARED" ? "shared" : "private"}
+              </span>
             </MetaRow>
             <MetaRow icon={<User size={12} />} label="Owner">
               <span className="text-[12px] text-text-primary">You</span>

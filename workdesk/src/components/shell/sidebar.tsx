@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Megaphone, MessageSquare, BookOpen,
   GitFork, Archive, Users, Star, Trash2, UserCircle2,
-  Settings2, LogOut,
+  Settings2, LogOut, Share2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
@@ -37,8 +37,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/library",         label: "Library",        icon: <BookOpen         {...I} /> },
   { href: "/graph",           label: "Graph View",     icon: <GitFork          {...I} /> },
   { href: "/archive",         label: "Archive",        icon: <Archive          {...I} /> },
-  { href: "/archive/shared",  label: "Shared with me", icon: <Users            {...I} /> },
-  { href: "/archive/starred", label: "Starred",        icon: <Star             {...I} /> },
+  { href: "/archive/shared",    label: "Shared with me",  icon: <Users            {...I} /> },
+  { href: "/archive/my-shares", label: "Shared Archive",  icon: <Share2           {...I} /> },
+  { href: "/archive/starred",   label: "Starred",          icon: <Star             {...I} /> },
   { href: "/archive/trash",   label: "Trash",          icon: <Trash2           {...I} /> },
   { href: "/profile",         label: "Profile",        icon: <UserCircle2      {...I} /> },
 ];

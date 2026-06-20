@@ -2,7 +2,7 @@ import { query, queryOne, transaction } from "@/lib/db";
 import { AuditAction, Visibility } from "@/lib/enums";
 import { emitActivityEvent } from "@/modules/activity/services/activityService";
 import { emitNotification } from "@/modules/notifications/services/notificationService";
-import type { ShareGrant, SharedArtifactSummary } from "../types";
+import type { ShareGrant, SharedArtifactSummary, OutgoingShare } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sharing Service
@@ -249,6 +249,126 @@ export async function listShareGrants(
     granteeName: r.grantee_name,
     granteeEmail: r.grantee_email,
     createdAt: r.created_at,
+  }));
+}
+
+// ── shareSet ──────────────────────────────────────────────────────────────────
+
+/**
+ * Share all artifacts within a set (and its sub-sets) with a user by email.
+ * Returns the count of artifacts newly shared.
+ */
+export async function shareSet(
+  ownerId: string,
+  setId: string,
+  granteeEmail: string
+): Promise<{ sharedCount: number }> {
+  // Verify the set exists and is owned by the caller.
+  const set = await queryOne<{ id: string; name: string }>(
+    `SELECT id, name FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    [setId, ownerId]
+  );
+  if (!set) throw new ArtifactNotFoundOrPrivateError();
+
+  // Resolve grantee.
+  const grantee = await queryOne<{ id: string; name: string; email: string }>(
+    `SELECT id, name, email FROM users WHERE email = $1 AND status = 'ACTIVE'`,
+    [granteeEmail]
+  );
+  if (!grantee) throw new GranteeNotFoundError();
+  if (grantee.id === ownerId) throw new CannotShareWithSelfError();
+
+  // Collect all artifacts in the set and its descendants owned by the caller.
+  const artifactRows = await query<{ id: string; title: string; visibility: string }>(
+    `WITH RECURSIVE set_tree AS (
+       SELECT id FROM sets WHERE id = $1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT s.id FROM sets s JOIN set_tree p ON s.parent_id = p.id WHERE s.deleted_at IS NULL
+     )
+     SELECT a.id, a.title, a.visibility FROM artifacts a
+     JOIN set_tree st ON st.id = a.set_id
+     WHERE a.deleted_at IS NULL AND a.owner_id = $2`,
+    [setId, ownerId]
+  );
+
+  let sharedCount = 0;
+
+  for (const artifact of artifactRows) {
+    // Skip if already shared with this user.
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id FROM artifact_shares WHERE artifact_id = $1 AND grantee_id = $2`,
+      [artifact.id, grantee.id]
+    );
+    if (existing) continue;
+
+    await transaction(async (tx) => {
+      if (artifact.visibility === "PRIVATE") {
+        await tx.query(
+          `UPDATE artifacts SET visibility = 'SHARED', updated_at = now() WHERE id = $1`,
+          [artifact.id]
+        );
+      }
+      await tx.query(
+        `INSERT INTO artifact_shares (artifact_id, owner_id, grantee_id)
+         VALUES ($1, $2, $3)`,
+        [artifact.id, ownerId, grantee.id]
+      );
+    });
+    sharedCount++;
+  }
+
+  if (sharedCount > 0) {
+    emitNotification(
+      grantee.id,
+      "ARTIFACT_SHARED",
+      "Folder shared with you",
+      `"${set.name}" (${sharedCount} item${sharedCount !== 1 ? "s" : ""}) was shared with you.`,
+      { setId, setName: set.name }
+    ).catch(() => {});
+
+    writeAuditLog(AuditAction.ARTIFACT_SHARED, ownerId, setId, {
+      setName: set.name, granteeId: grantee.id, granteeEmail, sharedCount,
+    }).catch(() => {});
+  }
+
+  return { sharedCount };
+}
+
+// ── listMyShares ──────────────────────────────────────────────────────────────
+
+/** All artifacts the current user has shared with others (outgoing shares). */
+export async function listMyShares(ownerId: string): Promise<OutgoingShare[]> {
+  const rows = await query<{
+    share_id: string;
+    artifact_id: string;
+    artifact_title: string;
+    artifact_type: string;
+    grantee_id: string;
+    grantee_name: string;
+    grantee_email: string;
+    shared_at: Date;
+  }>(
+    `SELECT s.id AS share_id, a.id AS artifact_id, a.title AS artifact_title,
+            a.type AS artifact_type,
+            g.id AS grantee_id, g.name AS grantee_name, g.email AS grantee_email,
+            s.created_at AS shared_at
+     FROM artifact_shares s
+     JOIN artifacts a ON a.id = s.artifact_id
+     JOIN users g     ON g.id = s.grantee_id
+     WHERE s.owner_id = $1 AND a.deleted_at IS NULL
+     ORDER BY s.created_at DESC`,
+    [ownerId]
+  );
+
+  return rows.map((r) => ({
+    shareId: r.share_id,
+    artifactId: r.artifact_id,
+    artifactTitle: r.artifact_title,
+    artifactType: r.artifact_type,
+    granteeId: r.grantee_id,
+    granteeName: r.grantee_name,
+    granteeEmail: r.grantee_email,
+    sharedAt: r.shared_at,
   }));
 }
 

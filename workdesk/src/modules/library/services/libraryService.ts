@@ -357,3 +357,69 @@ export async function getArtifactSections(artifactId: string): Promise<{ id: str
     [artifactId]
   );
 }
+
+// ── publishSetToLibrary ───────────────────────────────────────────────────────
+// Creates a library section named after the set, then publishes all artifacts
+// in that set (and any sub-sets) into the new section.
+
+export async function publishSetToLibrary(
+  ownerId: string,
+  setId: string
+): Promise<{ sectionId: string; publishedCount: number }> {
+  // Verify the set exists and is owned by the caller.
+  const set = await queryOne<{ id: string; name: string }>(
+    `SELECT id, name FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    [setId, ownerId]
+  );
+  if (!set) throw new ArtifactNotFoundError();
+
+  // Collect all artifact IDs in the set and its descendants.
+  const artifactRows = await query<{ id: string; title: string }>(
+    `WITH RECURSIVE set_tree AS (
+       SELECT id FROM sets WHERE id = $1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT s.id FROM sets s JOIN set_tree p ON s.parent_id = p.id WHERE s.deleted_at IS NULL
+     )
+     SELECT a.id, a.title FROM artifacts a
+     JOIN set_tree st ON st.id = a.set_id
+     WHERE a.deleted_at IS NULL AND a.owner_id = $2`,
+    [setId, ownerId]
+  );
+
+  // Create the section named after the set, then publish each artifact.
+  const sectionId = await transaction(async (tx) => {
+    const { rows: secRows } = await tx.query<{ id: string }>(
+      `INSERT INTO library_sections (name, description, created_by)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [set.name, `Published from folder "${set.name}"`, ownerId]
+    );
+    const sid = secRows[0].id;
+
+    for (const a of artifactRows) {
+      // Set PUBLIC + add to library_artifacts (skip if already there).
+      await tx.query(
+        `UPDATE artifacts SET visibility = 'PUBLIC', updated_at = now() WHERE id = $1`,
+        [a.id]
+      );
+      await tx.query(
+        `INSERT INTO library_artifacts (section_id, artifact_id, added_by)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [sid, a.id, ownerId]
+      );
+    }
+
+    await tx.query(
+      `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1,$2,$3,$4)`,
+      [
+        AuditAction.ARTIFACT_VISIBILITY_CHANGED as string,
+        ownerId,
+        sid,
+        JSON.stringify({ setId, setName: set.name, count: artifactRows.length }),
+      ]
+    );
+
+    return sid;
+  });
+
+  return { sectionId, publishedCount: artifactRows.length };
+}

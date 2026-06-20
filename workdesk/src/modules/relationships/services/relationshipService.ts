@@ -142,67 +142,93 @@ export async function getRelationships(userId: string, artifactId: string): Prom
 
 // ── getGraphData ──────────────────────────────────────────────────────────────
 // Returns the full hierarchy the user can see:
-// - Own sets/subsets/artifacts
-// - PUBLIC artifacts (from any member)
-// - Artifact relationship edges
-// When teamView=true, adds member-root nodes and reframes the hierarchy under each member.
+// - ALWAYS: own sets/subsets/artifacts (personal archive, regardless of teamView)
+// - teamView=true: adds other members as root nodes and shows ONLY their
+//   Library-published (PUBLIC) artifacts, not their private/shared archives.
+//
+// The team-view toggle is always available regardless of how many personal
+// artifacts the user has.
 
 export async function getGraphData(userId: string, teamView = false): Promise<GraphData> {
-  // 1. All sets the user owns
+  // 1. All sets the user owns (always shown — personal archive)
   const ownSets = await query<{ id: string; name: string; parent_id: string | null; owner_id: string }>(
     `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY name`,
     [userId]
   );
 
-  // 2. All artifacts the user can see (own + shared + public)
-  const artifacts = await query<{
+  // 2a. User's own artifacts (always shown regardless of teamView)
+  const ownArtifacts = await query<{
     id: string; title: string; type: string; visibility: string; tags: unknown;
     owner_id: string; owner_name: string; set_id: string | null;
   }>(
     `SELECT a.id, a.title, a.type, a.visibility, a.tags, a.owner_id, u.name AS owner_name, a.set_id
      FROM artifacts a
      JOIN users u ON u.id = a.owner_id
-     WHERE a.deleted_at IS NULL AND (
-       a.owner_id = $1
-       OR a.visibility = 'PUBLIC'
-       OR EXISTS (SELECT 1 FROM artifact_shares s WHERE s.artifact_id = a.id AND s.grantee_id = $1)
-     )
+     WHERE a.deleted_at IS NULL AND a.owner_id = $1
      ORDER BY a.title`,
     [userId]
   );
 
-  // 3. Sets owned by other members whose PUBLIC artifacts we can see
-  const publicArtifactOwnerIds = [...new Set(
-    artifacts.filter(a => a.owner_id !== userId && a.visibility === "PUBLIC").map(a => a.owner_id)
-  )];
-
+  // 2b. In team view: other members' PUBLIC library-published artifacts only.
+  let teamArtifacts: typeof ownArtifacts = [];
   let teamSets: typeof ownSets = [];
   let teamMembers: { id: string; name: string }[] = [];
 
-  if (teamView && publicArtifactOwnerIds.length > 0) {
-    const placeholders = publicArtifactOwnerIds.map((_, i) => `$${i + 1}`).join(",");
-    teamSets = await query<{ id: string; name: string; parent_id: string | null; owner_id: string }>(
-      `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY name`,
-      publicArtifactOwnerIds
+  if (teamView) {
+    teamArtifacts = await query<{
+      id: string; title: string; type: string; visibility: string; tags: unknown;
+      owner_id: string; owner_name: string; set_id: string | null;
+    }>(
+      `SELECT a.id, a.title, a.type, a.visibility, a.tags, a.owner_id, u.name AS owner_name, a.set_id
+       FROM artifacts a
+       JOIN users u ON u.id = a.owner_id
+       WHERE a.deleted_at IS NULL
+         AND a.owner_id <> $1
+         AND a.visibility = 'PUBLIC'
+         AND EXISTS (SELECT 1 FROM library_artifacts la WHERE la.artifact_id = a.id)
+       ORDER BY a.title`,
+      [userId]
     );
-    const memberRows = await query<{ id: string; name: string }>(
-      `SELECT id, name FROM users WHERE id IN (${placeholders}) ORDER BY name`,
-      publicArtifactOwnerIds
-    );
-    teamMembers = memberRows;
+
+    const teamOwnerIds = [...new Set(teamArtifacts.map(a => a.owner_id))];
+
+    if (teamOwnerIds.length > 0) {
+      const placeholders = teamOwnerIds.map((_, i) => `$${i + 1}`).join(",");
+      teamSets = await query<{ id: string; name: string; parent_id: string | null; owner_id: string }>(
+        `SELECT DISTINCT s.id, s.name, s.parent_id, s.owner_id
+         FROM sets s
+         WHERE s.owner_id IN (${placeholders}) AND s.deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM artifacts a
+             JOIN library_artifacts la ON la.artifact_id = a.id
+             WHERE a.set_id = s.id AND a.visibility = 'PUBLIC' AND a.owner_id = s.owner_id
+           )
+         ORDER BY s.name`,
+        teamOwnerIds
+      );
+      const memberRows = await query<{ id: string; name: string }>(
+        `SELECT id, name FROM users WHERE id IN (${placeholders}) ORDER BY name`,
+        teamOwnerIds
+      );
+      teamMembers = memberRows;
+    }
   }
 
-  // 4. Artifact relationship edges
+  const artifacts = [...ownArtifacts, ...teamArtifacts];
+
+  // 3. Artifact relationship edges (own + team PUBLIC library artifacts)
   const relRows = await query<{ id: string; from_id: string; to_id: string; type: string }>(
     `SELECT ar.id, ar.from_id, ar.to_id, ar.type
      FROM artifact_relationships ar
      JOIN artifacts fa ON fa.id = ar.from_id
      JOIN artifacts ta ON ta.id = ar.to_id
      WHERE fa.deleted_at IS NULL AND ta.deleted_at IS NULL
-       AND (fa.owner_id = $1 OR fa.visibility = 'PUBLIC'
-            OR EXISTS (SELECT 1 FROM artifact_shares s WHERE s.artifact_id = fa.id AND s.grantee_id = $1))
-       AND (ta.owner_id = $1 OR ta.visibility = 'PUBLIC'
-            OR EXISTS (SELECT 1 FROM artifact_shares s WHERE s.artifact_id = ta.id AND s.grantee_id = $1))`,
+       AND (fa.owner_id = $1
+            OR (fa.visibility = 'PUBLIC'
+                AND EXISTS (SELECT 1 FROM library_artifacts la WHERE la.artifact_id = fa.id)))
+       AND (ta.owner_id = $1
+            OR (ta.visibility = 'PUBLIC'
+                AND EXISTS (SELECT 1 FROM library_artifacts la WHERE la.artifact_id = ta.id)))`,
     [userId]
   );
 
@@ -226,17 +252,16 @@ export async function getGraphData(userId: string, teamView = false): Promise<Gr
   allSets.forEach(s => setDepth(s.id));
 
   if (teamView) {
-    // Member root nodes
-    // Own member node
+    // Own member node always appears first so user sees themselves in the team view
     const selfRow = await queryOne<{ id: string; name: string }>(`SELECT id, name FROM users WHERE id = $1`, [userId]);
     if (selfRow) {
-      nodes.push({ id: `member-${selfRow.id}`, type: "member", label: selfRow.name, depth: 0, ownerId: selfRow.id });
+      nodes.push({ id: `member-${selfRow.id}`, type: "member", label: `${selfRow.name} (you)`, depth: 0, ownerId: selfRow.id });
     }
     teamMembers.forEach(m => {
       nodes.push({ id: `member-${m.id}`, type: "member", label: m.name, depth: 0, ownerId: m.id });
     });
 
-    // Connect sets to their member root
+    // Connect root sets to their member node
     allSets.filter(s => !s.parent_id).forEach(s => {
       edges.push({ id: `e-member-${s.owner_id}-${s.id}`, source: `member-${s.owner_id}`, target: s.id, edgeType: "hierarchy" });
     });

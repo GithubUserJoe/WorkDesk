@@ -105,3 +105,15 @@ export function useUnsubscribeSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: libKeys.sections() }),
   });
 }
+
+export function usePublishSetToLibrary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (setId: string) =>
+      api.post<{ sectionId: string; publishedCount: number }>("/api/library/publish-set", { setId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: libKeys.sections() });
+      qc.invalidateQueries({ queryKey: ["archive"] });
+    },
+  });
+}

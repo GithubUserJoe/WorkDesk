@@ -26,3 +26,15 @@ export interface SharedArtifactSummary {
   updatedAt: Date;
   sharedAt: Date;
 }
+
+/** Outgoing share — artifact the current user shared with a grantee. */
+export interface OutgoingShare {
+  shareId: string;
+  artifactId: string;
+  artifactTitle: string;
+  artifactType: string;
+  granteeId: string;
+  granteeName: string;
+  granteeEmail: string;
+  sharedAt: Date;
+}

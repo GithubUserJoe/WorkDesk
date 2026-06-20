@@ -306,6 +306,17 @@ export interface SharedArtifactSummary {
   sharedAt: Date;
 }
 
+export interface OutgoingShare {
+  shareId: string;
+  artifactId: string;
+  artifactTitle: string;
+  artifactType: string;
+  granteeId: string;
+  granteeName: string;
+  granteeEmail: string;
+  sharedAt: Date;
+}
+
 export function useShareGrants(artifactId: string, enabled = true) {
   return useQuery<ShareGrant[]>({
     queryKey: ["archive", "shares", artifactId],
@@ -323,6 +334,14 @@ export function useSharedWithMe() {
   });
 }
 
+export function useMyShares() {
+  return useQuery<OutgoingShare[]>({
+    queryKey: ["archive", "my-shares"],
+    queryFn: () => api.get<OutgoingShare[]>("/api/archive/my-shares"),
+    staleTime: 30_000,
+  });
+}
+
 export function useShareArtifact(artifactId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -330,6 +349,7 @@ export function useShareArtifact(artifactId: string) {
       api.post<ShareGrant>(`/api/archive/artifacts/${artifactId}/share`, { granteeEmail }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["archive", "shares", artifactId] });
+      qc.invalidateQueries({ queryKey: ["archive", "my-shares"] });
       qc.invalidateQueries({ queryKey: ["archive"] });
     },
   });
@@ -342,6 +362,19 @@ export function useRevokeShare(artifactId: string) {
       api.deleteWithBody(`/api/archive/artifacts/${artifactId}/share`, { granteeId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["archive", "shares", artifactId] });
+      qc.invalidateQueries({ queryKey: ["archive", "my-shares"] });
+      qc.invalidateQueries({ queryKey: ["archive"] });
+    },
+  });
+}
+
+export function useShareSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ setId, granteeEmail }: { setId: string; granteeEmail: string }) =>
+      api.post<{ sharedCount: number }>(`/api/archive/sets/${setId}/share`, { granteeEmail }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["archive", "my-shares"] });
       qc.invalidateQueries({ queryKey: ["archive"] });
     },
   });

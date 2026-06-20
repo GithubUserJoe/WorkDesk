@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FolderOpen, Folder, MoreHorizontal, Plus, FileText, Loader2 } from "lucide-react";
+import { ChevronRight, FolderOpen, Folder, MoreHorizontal, Plus, FileText, Loader2, BookOpen, Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { useSets, useCreateSet, useUpdateSet, useDeleteSet } from "@/modules/archive/hooks";
+import { usePublishSetToLibrary } from "@/modules/library/hooks";
+import { ShareSetDialog } from "@/components/archive/share-set-dialog";
 import type { SetSummary, ArtifactSummary } from "@/modules/archive/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,6 +129,9 @@ function SetNode({
   const updateSet = useUpdateSet();
   const deleteSet = useDeleteSet();
   const createSet = useCreateSet();
+  const publishSet = usePublishSetToLibrary();
+  const [publishStatus, setPublishStatus] = useState<"idle" | "loading" | "done">("idle");
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Lazy-load contents when expanded
   const { data: childSets = [], isLoading: setsLoading } = useQuery<SetSummary[]>({
@@ -152,6 +157,18 @@ function SetNode({
   async function handleDelete() {
     setMenuOpen(false);
     await deleteSet.mutateAsync(set.id);
+  }
+
+  async function handlePublishToLibrary() {
+    setMenuOpen(false);
+    setPublishStatus("loading");
+    try {
+      await publishSet.mutateAsync(set.id);
+      setPublishStatus("done");
+      setTimeout(() => setPublishStatus("idle"), 3000);
+    } catch {
+      setPublishStatus("idle");
+    }
   }
 
   async function handleChildCreate() {
@@ -198,7 +215,11 @@ function SetNode({
             className="flex-1 min-w-0 h-5 px-1 text-[12px] bg-surface-container border border-primary rounded outline-none text-text-primary"
           />
         ) : (
-          <span className="flex-1 min-w-0 truncate text-[12px]">{set.name}</span>
+          <span className="flex-1 min-w-0 truncate text-[12px] flex items-center gap-1">
+            {set.name}
+            {publishStatus === "loading" && <Loader2 size={9} className="animate-spin text-text-secondary shrink-0" />}
+            {publishStatus === "done" && <BookOpen size={9} className="text-primary shrink-0" />}
+          </span>
         )}
 
         {/* Per-set actions */}
@@ -222,6 +243,8 @@ function SetNode({
                 <SetMenu
                   onRename={() => { setRenaming(true); setMenuOpen(false); }}
                   onDelete={handleDelete}
+                  onPublishToLibrary={handlePublishToLibrary}
+                  onShare={() => { setShareOpen(true); setMenuOpen(false); }}
                   onClose={() => setMenuOpen(false)}
                 />
               )}
@@ -229,6 +252,14 @@ function SetNode({
           </div>
         )}
       </div>
+
+      {/* Share Set Dialog */}
+      <ShareSetDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        setId={set.id}
+        setName={set.name}
+      />
 
       {/* Expanded contents */}
       {expanded && (
@@ -314,17 +345,40 @@ function ArtifactLeaf({
 
 // ── SetMenu ───────────────────────────────────────────────────────────────────
 
-function SetMenu({ onRename, onDelete, onClose }: { onRename: () => void; onDelete: () => void; onClose: () => void; }) {
+function SetMenu({
+  onRename, onDelete, onPublishToLibrary, onShare, onClose,
+}: {
+  onRename: () => void;
+  onDelete: () => void;
+  onPublishToLibrary: () => void;
+  onShare: () => void;
+  onClose: () => void;
+}) {
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute right-0 top-6 z-50 w-36 bg-surface-elevated border border-border-default rounded-md shadow-lg py-1 overflow-hidden">
+      <div className="absolute right-0 top-6 z-50 w-48 bg-surface-elevated border border-border-default rounded-md shadow-lg py-1 overflow-hidden">
         <button
           onClick={onRename}
           className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-text-secondary hover:bg-surface-container-high hover:text-text-primary transition-colors"
         >
           Rename
         </button>
+        <button
+          onClick={onShare}
+          className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-text-secondary hover:bg-surface-container-high hover:text-text-primary transition-colors"
+        >
+          <Share2 size={11} />
+          Share with member
+        </button>
+        <button
+          onClick={onPublishToLibrary}
+          className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-text-secondary hover:bg-surface-container-high hover:text-text-primary transition-colors"
+        >
+          <BookOpen size={11} />
+          Publish to Library
+        </button>
+        <div className="my-1 border-t border-border-default" />
         <button
           onClick={onDelete}
           className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-status-danger hover:bg-surface-container-high transition-colors"
