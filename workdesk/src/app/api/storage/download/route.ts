@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import { getPresignedDownloadUrl } from "@/lib/storage";
 import { verifyContentKeyReference, InvalidContentKeyError } from "@/modules/archive/services/archiveService";
 import { DownloadQuerySchema } from "@/modules/archive/schemas";
@@ -14,7 +14,7 @@ import { ok, fail } from "@/types/common";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
 
     const parsed = DownloadQuerySchema.safeParse({

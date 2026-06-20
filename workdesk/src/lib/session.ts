@@ -4,8 +4,14 @@ import { Role } from "@/lib/enums";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Session Data Shape
+//
 // The session cookie carries the minimum trusted payload needed to enforce
-// auth and RBAC at the middleware/route-handler level without a DB roundtrip.
+// auth, RBAC, and room-gating at the proxy/route-handler level without a
+// DB round-trip.
+//
+// hasRoom: true once the user belongs to ≥1 Team Room. Stamped at login and
+//   refreshed by POST /api/auth/refresh-room after any room membership change.
+//   The proxy reads this flag to enforce the onboarding hard gate at the edge.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SessionData {
@@ -14,18 +20,11 @@ export interface SessionData {
   name: string;
   role: Role;
   isLoggedIn: boolean;
+  hasRoom: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // iron-session Options
-//
-// password: 32+ character secret used to seal (encrypt + sign) the cookie.
-//           Must be set in .env as SESSION_SECRET.
-// cookieName: arbitrary but namespaced to avoid collisions.
-// cookie.httpOnly: blocks JS access — protects against XSS token theft.
-// cookie.secure: HTTPS-only in production.
-// cookie.sameSite: "lax" prevents CSRF on same-site navigations.
-// cookie.maxAge: 7-day sliding expiry (seconds). Subtract 60s safety margin.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const SESSION_OPTIONS: SessionOptions = {
@@ -41,8 +40,6 @@ export const SESSION_OPTIONS: SessionOptions = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // getSession
-// Returns the iron-session instance for the current request.
-// Must be called inside Server Components, Route Handlers, or Server Actions.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getSession(): Promise<IronSession<SessionData>> {
@@ -52,8 +49,7 @@ export async function getSession(): Promise<IronSession<SessionData>> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // requireSession
-// Throws a typed error if no valid session exists.
-// Use in route handlers that need an authenticated caller.
+// Throws UnauthenticatedError if no valid session exists.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function requireSession(): Promise<SessionData> {
@@ -67,12 +63,31 @@ export async function requireSession(): Promise<SessionData> {
     name: session.name,
     role: session.role,
     isLoggedIn: session.isLoggedIn,
+    hasRoom: session.hasRoom ?? false,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// requireRoomSession
+//
+// Extends requireSession with a Team Room membership assertion.
+// Use on every route that requires an active room context — i.e. everything
+// except /api/auth/* and /api/teams/* (which are exempt by design).
+//
+// Throws NoRoomError (→ 403 NO_ROOM) when the user has no room.
+// The client maps this to a redirect to /onboarding.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function requireRoomSession(): Promise<SessionData> {
+  const sessionData = await requireSession();
+  if (!sessionData.hasRoom) {
+    throw new NoRoomError();
+  }
+  return sessionData;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // requireAdminSession
-// Extends requireSession with an ADMIN role assertion.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function requireAdminSession(): Promise<SessionData> {
@@ -85,7 +100,6 @@ export async function requireAdminSession(): Promise<SessionData> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed Auth Errors
-// Keeps route handlers clean — catch and map to HTTP status at the edge.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class UnauthenticatedError extends Error {
@@ -101,5 +115,13 @@ export class ForbiddenError extends Error {
   constructor() {
     super("Insufficient permissions.");
     this.name = "ForbiddenError";
+  }
+}
+
+export class NoRoomError extends Error {
+  readonly code = "NO_ROOM";
+  constructor() {
+    super("You must belong to a Team Room to access this resource.");
+    this.name = "NoRoomError";
   }
 }

@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireRoomSession, NoRoomError } from "@/lib/session";
 import {
   markRead,
   deleteNotification,
@@ -14,7 +14,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
     await markRead(session.userId, id);
     return NextResponse.json(ok(null));
@@ -32,7 +32,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
     await deleteNotification(session.userId, id);
     return NextResponse.json(ok(null));

@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import {
   getSectionArtifacts,
@@ -16,12 +16,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     void session; // auth check only; section is public to all members
     const { id } = await params;
     const artifacts = await getSectionArtifacts(id);
     return NextResponse.json(ok(artifacts));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof SectionNotFoundError)
@@ -36,11 +38,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
     await deleteSection(session.userId, session.role, id);
     return NextResponse.json(ok({ deleted: true }));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof SectionNotFoundError)

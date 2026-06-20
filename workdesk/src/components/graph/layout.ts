@@ -25,118 +25,177 @@ const EDGE_COLORS: Record<string, string> = {
 export function buildFloatingGraph(data: GraphData): { nodes: Node[]; edges: Edge[] } {
   const { nodes: gNodes, edges: gEdges } = data;
 
-  // Separate members (team view roots), sets, and artifacts
-  const memberNodes = gNodes.filter(n => n.type === "member");
-  const setNodes    = gNodes.filter(n => n.type === "set" || n.type === "subset");
+  const memberNodes   = gNodes.filter(n => n.type === "member");
+  const setNodes      = gNodes.filter(n => n.type === "set" || n.type === "subset");
   const artifactNodes = gNodes.filter(n => n.type === "artifact");
+  const isTeamView    = memberNodes.length > 0;
 
-  // Group artifacts by parentId (set they belong to)
+  // Group artifacts by their containing set
   const bySet = new Map<string, GraphNode[]>();
-  const orphanArtifacts: GraphNode[] = [];
   for (const a of artifactNodes) {
     if (a.parentId) {
       const arr = bySet.get(a.parentId) ?? [];
       arr.push(a);
       bySet.set(a.parentId, arr);
-    } else {
-      orphanArtifacts.push(a);
+    }
+  }
+
+  // Orphan artifacts = no set. In team view, group them by owner.
+  const orphansByOwner = new Map<string, GraphNode[]>();
+  for (const a of artifactNodes) {
+    if (!a.parentId) {
+      const key = a.ownerId ?? "__none__";
+      const arr = orphansByOwner.get(key) ?? [];
+      arr.push(a);
+      orphansByOwner.set(key, arr);
     }
   }
 
   const flowNodes: Node[] = [];
-  let cursorX = 60;
-  const ARTIFACT_Y = 160; // y where artifact rows start (below set header)
+  const MEMBER_Y    = 0;
+  const SET_Y       = 120;  // sets start below member node
+  const ARTIFACT_Y  = 240;  // artifacts start below set row
+  const MEMBER_COL_GAP = 80; // gap between member columns
 
-  // Member nodes — float across the very top if team view
-  if (memberNodes.length > 0) {
-    memberNodes.forEach((m, i) => {
-      flowNodes.push({
-        id: m.id,
-        type: "memberNode",
-        position: { x: 60 + i * (F_ARTIFACT_W + F_ITEM_GAP), y: -120 },
-        data: { label: m.label, depth: m.depth ?? 0, rawNode: m },
-        draggable: true,
-      });
+  // Helper to push an artifact node at absolute (x, y)
+  function pushArtifact(a: GraphNode, x: number, y: number) {
+    flowNodes.push({
+      id: a.id,
+      type: "artifactNode",
+      position: { x, y },
+      data: {
+        label: a.label,
+        nodeType: a.type,
+        artifactType: a.artifactType,
+        visibility: a.visibility,
+        tags: a.tags ?? [],
+        ownerName: a.ownerName,
+        ownerId: a.ownerId,
+        depth: a.depth ?? 0,
+        rawNode: a,
+      },
+      draggable: true,
     });
   }
 
-  // Set groups — each set header + its artifacts in a grid below
-  for (const setNode of setNodes) {
+  // Helper to push a set + its child artifacts, returns the width consumed
+  function pushSetGroup(setNode: GraphNode, originX: number, originY: number): number {
     const members = bySet.get(setNode.id) ?? [];
     const cols = Math.max(1, Math.ceil(Math.sqrt(members.length)));
-    const groupW = Math.max(
-      140,
-      cols * F_ARTIFACT_W + (cols - 1) * F_ITEM_GAP,
-    );
+    const groupW = Math.max(140, cols * F_ARTIFACT_W + (cols - 1) * F_ITEM_GAP);
 
-    // Set header node
     flowNodes.push({
       id: setNode.id,
       type: "setNode",
-      position: { x: cursorX + (groupW - 140) / 2, y: 60 },
+      position: { x: originX + (groupW - 140) / 2, y: originY },
       data: {
         label: setNode.label,
         nodeType: setNode.type,
+        ownerId: setNode.ownerId,
         depth: setNode.depth ?? 0,
         rawNode: setNode,
       },
       draggable: true,
     });
 
-    // Artifact nodes in a grid below the set header
     members.forEach((a, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      flowNodes.push({
-        id: a.id,
-        type: "artifactNode",
-        position: {
-          x: cursorX + col * (F_ARTIFACT_W + F_ITEM_GAP),
-          y: ARTIFACT_Y + row * (F_ARTIFACT_H + F_ITEM_GAP),
-        },
-        data: {
-          label: a.label,
-          nodeType: a.type,
-          artifactType: a.artifactType,
-          visibility: a.visibility,
-          tags: a.tags ?? [],
-          ownerName: a.ownerName,
-          depth: a.depth ?? 0,
-          rawNode: a,
-        },
-        draggable: true,
-      });
+      pushArtifact(a,
+        originX + col * (F_ARTIFACT_W + F_ITEM_GAP),
+        originY + F_SET_H + F_ROW_GAP + row * (F_ARTIFACT_H + F_ITEM_GAP),
+      );
     });
 
-    cursorX += groupW + F_COL_GAP;
+    return groupW;
   }
 
-  // Orphan artifacts — no set, placed in a row at the end
-  if (orphanArtifacts.length > 0) {
-    const cols = Math.max(1, Math.ceil(Math.sqrt(orphanArtifacts.length)));
-    orphanArtifacts.forEach((a, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
+  if (isTeamView) {
+    // ── Team view: one column per member ─────────────────────────────────────
+    // Each column: member node → sets → orphan artifacts (all for that member).
+    let colX = 60;
+
+    for (const member of memberNodes) {
+      const ownerId = member.ownerId ?? member.id.replace("member-", "");
+      const memberSets = setNodes.filter(s => s.ownerId === ownerId);
+      const memberOrphans = orphansByOwner.get(ownerId) ?? [];
+
+      // Compute column width = max of (all set group widths) or orphan grid width
+      let colW = 160; // minimum for the member node
+      const setGroupWidths: number[] = [];
+      for (const s of memberSets) {
+        const members = bySet.get(s.id) ?? [];
+        const cols = Math.max(1, Math.ceil(Math.sqrt(members.length)));
+        const w = Math.max(140, cols * F_ARTIFACT_W + (cols - 1) * F_ITEM_GAP);
+        setGroupWidths.push(w);
+        colW = Math.max(colW, w);
+      }
+      if (memberOrphans.length > 0) {
+        const oCols = Math.max(1, Math.ceil(Math.sqrt(memberOrphans.length)));
+        const oW = Math.max(140, oCols * F_ARTIFACT_W + (oCols - 1) * F_ITEM_GAP);
+        colW = Math.max(colW, oW);
+      }
+
+      // Member root node — centred over the column
       flowNodes.push({
-        id: a.id,
-        type: "artifactNode",
-        position: {
-          x: cursorX + col * (F_ARTIFACT_W + F_ITEM_GAP),
-          y: ARTIFACT_Y + row * (F_ARTIFACT_H + F_ITEM_GAP),
-        },
-        data: {
-          label: a.label,
-          nodeType: a.type,
-          artifactType: a.artifactType,
-          visibility: a.visibility,
-          tags: a.tags ?? [],
-          ownerName: a.ownerName,
-          depth: a.depth ?? 0,
-          rawNode: a,
-        },
+        id: member.id,
+        type: "memberNode",
+        position: { x: colX + (colW - 160) / 2, y: MEMBER_Y },
+        data: { label: member.label, depth: 0, ownerId, rawNode: member },
         draggable: true,
       });
-    });
+
+      // Sets for this member
+      let setRowX = colX;
+      let setRowMaxBottom = SET_Y + F_SET_H; // track how far down sets go
+      memberSets.forEach((s, si) => {
+        const w = setGroupWidths[si];
+        const members = bySet.get(s.id) ?? [];
+        const rows = members.length > 0 ? Math.ceil(members.length / Math.max(1, Math.ceil(Math.sqrt(members.length)))) : 0;
+        const groupH = F_SET_H + (rows > 0 ? F_ROW_GAP + rows * (F_ARTIFACT_H + F_ITEM_GAP) : 0);
+        pushSetGroup(s, setRowX, SET_Y);
+        setRowMaxBottom = Math.max(setRowMaxBottom, SET_Y + groupH);
+        setRowX += w + F_COL_GAP;
+      });
+
+      // Orphan artifacts for this member — placed below sets
+      const orphanY = setRowMaxBottom + (memberSets.length > 0 ? 40 : 0);
+      if (memberOrphans.length > 0) {
+        const oCols = Math.max(1, Math.ceil(Math.sqrt(memberOrphans.length)));
+        memberOrphans.forEach((a, i) => {
+          const col = i % oCols;
+          const row = Math.floor(i / oCols);
+          pushArtifact(a,
+            colX + col * (F_ARTIFACT_W + F_ITEM_GAP),
+            orphanY + row * (F_ARTIFACT_H + F_ITEM_GAP),
+          );
+        });
+      }
+
+      colX += colW + MEMBER_COL_GAP;
+    }
+
+  } else {
+    // ── Personal view: flat layout — sets left to right, orphans at the end ──
+    let cursorX = 60;
+
+    for (const setNode of setNodes) {
+      const w = pushSetGroup(setNode, cursorX, SET_Y - 60);
+      cursorX += w + F_COL_GAP;
+    }
+
+    const personalOrphans = artifactNodes.filter(a => !a.parentId);
+    if (personalOrphans.length > 0) {
+      const cols = Math.max(1, Math.ceil(Math.sqrt(personalOrphans.length)));
+      personalOrphans.forEach((a, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        pushArtifact(a,
+          cursorX + col * (F_ARTIFACT_W + F_ITEM_GAP),
+          ARTIFACT_Y - 60 + row * (F_ARTIFACT_H + F_ITEM_GAP),
+        );
+      });
+    }
   }
 
   // Edges — only relationship edges are drawn in floating mode

@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { ShareArtifactSchema, RevokeShareSchema } from "@/modules/sharing/schemas";
 import {
@@ -24,11 +24,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: artifactId } = await params;
     const grants = await listShareGrants(session.userId, artifactId);
     return NextResponse.json(ok(grants), { status: 200 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundOrPrivateError)
@@ -43,7 +45,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: artifactId } = await params;
     const body: unknown = await req.json();
     const parsed = ShareArtifactSchema.safeParse(body);
@@ -53,6 +55,8 @@ export async function POST(
     const grant = await shareArtifact(session.userId, artifactId, parsed.data.granteeEmail);
     return NextResponse.json(ok(grant), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundOrPrivateError)
@@ -73,7 +77,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: artifactId } = await params;
     const body: unknown = await req.json();
     const parsed = RevokeShareSchema.safeParse(body);
@@ -83,6 +87,8 @@ export async function DELETE(
     await revokeShare(session.userId, artifactId, parsed.data.granteeId);
     return NextResponse.json(ok({ revoked: true }), { status: 200 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundOrPrivateError)

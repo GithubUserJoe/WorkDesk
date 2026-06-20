@@ -2,8 +2,14 @@ import { Sidebar } from "@/components/shell/sidebar";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Authenticated app shell layout.
-// Route protection is enforced at the edge by src/proxy.ts — these routes
-// (/dashboard, /archive, /settings, /profile) require a session.
+//
+// Auth + room gating is enforced at three layers:
+//   1. Edge proxy (src/proxy.ts) — reads session.hasRoom from the cookie;
+//      redirects unauthenticated users to /login and room-less users to
+//      /onboarding with zero DB cost.
+//   2. Route handlers — requireRoomSession() → 403 NO_ROOM on any API call
+//      that bypasses the proxy (curl, direct fetch, etc.).
+//   3. This layout is the happy path — no DB calls here; trust the layers above.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

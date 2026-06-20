@@ -1,4 +1,4 @@
-// LOCAL STORAGE ONLY — remove this file when switching back to R2.
+﻿// LOCAL STORAGE ONLY — remove this file when switching back to R2.
 //
 // PUT /api/storage/local/archives/{userId}/{uuid}-{filename}
 //   Receives raw file bytes from the client (upload.ts fetch PUT) and writes
@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
-import { requireSession } from "@/lib/session";
+import { requireRoomSession, NoRoomError } from "@/lib/session";
 import { verifyContentKeyReference, InvalidContentKeyError } from "@/modules/archive/services/archiveService";
 import { fail } from "@/types/common";
 
@@ -49,7 +49,7 @@ export async function PUT(
   // Auth: the PUT comes from the browser via upload.ts after the server issued
   // the ticket. Require a valid session so unauthenticated actors can't write.
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { path: segments } = await params;
 
     // Enforce ownership: segment[1] must be the session userId.
@@ -85,7 +85,7 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { path: segments } = await params;
 
     if (!segments || segments.length < 3 || segments[0] !== "archives") {

@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireRoomSession, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { getRelationships } from "@/modules/relationships/services/relationshipService";
 
 // GET /api/archive/artifacts/[id]/relationships
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
     const rels = await getRelationships(session.userId, id);
     return NextResponse.json(ok(rels));

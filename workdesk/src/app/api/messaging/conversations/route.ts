@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { StartConversationSchema } from "@/modules/messaging/schemas";
 import {
@@ -18,10 +18,12 @@ import {
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const conversations = await listConversations(session.userId);
     return NextResponse.json(ok(conversations));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     console.error("[GET /api/messaging/conversations]", err);
@@ -31,7 +33,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body: unknown = await req.json();
     const parsed = StartConversationSchema.safeParse(body);
     if (!parsed.success)
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
     return NextResponse.json(ok({ conversationId: convId, message }), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof UserNotFoundError)

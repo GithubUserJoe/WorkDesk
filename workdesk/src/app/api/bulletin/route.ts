@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { CreateBulletinSchema, ListBulletinsQuerySchema } from "@/modules/bulletin/schemas";
 import {
@@ -14,7 +14,7 @@ import {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
     const parsed = ListBulletinsQuerySchema.safeParse({
       limit: searchParams.get("limit") ?? undefined,
@@ -29,6 +29,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     return NextResponse.json(ok(items));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     console.error("[GET /api/bulletin]", err);
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body: unknown = await req.json();
     const parsed = CreateBulletinSchema.safeParse(body);
     if (!parsed.success)
@@ -47,6 +49,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const bulletin = await createBulletin(session.userId, parsed.data);
     return NextResponse.json(ok(bulletin), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     console.error("[POST /api/bulletin]", err);

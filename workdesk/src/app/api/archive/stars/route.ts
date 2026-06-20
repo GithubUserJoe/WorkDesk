@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import {
   starTarget,
   unstarTarget,
@@ -20,7 +20,7 @@ import { ok, fail } from "@/types/common";
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const starred = await listStarred(session.userId);
     return NextResponse.json(ok(starred));
   } catch (err) {
@@ -41,7 +41,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body = await req.json();
 
     const parsed = ToggleStarSchema.safeParse(body);
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
 
     const parsed = StarQuerySchema.safeParse({

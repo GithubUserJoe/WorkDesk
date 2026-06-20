@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireRoomSession, NoRoomError } from "@/lib/session";
 import { updateArtifact, ArtifactNotFoundError, SetNotFoundError } from "@/modules/archive/services/archiveService";
 import { IdParamSchema } from "@/modules/archive/schemas";
 import { ok, fail } from "@/types/common";
@@ -16,7 +16,7 @@ interface RouteParams {
 // POST /api/archive/artifacts/[id]/move — move artifact to a different set
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
 
     const idParsed = IdParamSchema.safeParse({ id });

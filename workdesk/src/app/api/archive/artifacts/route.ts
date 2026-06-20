@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import {
   createArtifact,
   updateArtifact,
@@ -21,7 +21,7 @@ import { ok, fail } from "@/types/common";
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
     const id = searchParams.get("id");
 
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body = await req.json();
 
     const parsed = CreateArtifactSchema.safeParse(body);
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
     const id = searchParams.get("id");
 
@@ -146,7 +146,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
     const id = searchParams.get("id");
 

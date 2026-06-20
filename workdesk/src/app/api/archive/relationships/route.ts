@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import { query } from "@/lib/db";
 import { ok, fail } from "@/types/common";
 import { CreateRelationshipSchema, DeleteRelationshipSchema } from "@/modules/relationships/schemas";
@@ -22,7 +22,7 @@ import {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const userId = session.userId;
 
     const nodes = await query<{
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // POST /api/archive/relationships — create a relationship between two artifacts
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body = await req.json().catch(() => ({}));
     const parsed = CreateRelationshipSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.flatten()), { status: 400 });
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 // DELETE /api/archive/relationships — delete a relationship
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body = await req.json().catch(() => ({}));
     const parsed = DeleteRelationshipSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.flatten()), { status: 400 });

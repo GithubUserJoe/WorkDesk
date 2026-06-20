@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession, UnauthenticatedError, ForbiddenError } from "@/lib/session";
+import { requireAdminSession, requireRoomSession, UnauthenticatedError, ForbiddenError, NoRoomError } from "@/lib/session";
 import { transferOwnership, OwnershipTransferError } from "@/modules/archive/services/ownershipService";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
@@ -30,6 +30,8 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     await transferOwnership(session.userId, kind, itemId, newOwnerId);
     return NextResponse.json(ok(null), { status: 200 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ForbiddenError)

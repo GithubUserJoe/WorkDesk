@@ -63,6 +63,12 @@ export const AuditAction = {
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
+export const RoomMemberRole = {
+  OWNER: "OWNER",
+  MEMBER: "MEMBER",
+} as const;
+export type RoomMemberRole = (typeof RoomMemberRole)[keyof typeof RoomMemberRole];
+
 export const BulletinType = {
   ANNOUNCEMENT: "ANNOUNCEMENT",
   COUNTDOWN: "COUNTDOWN",

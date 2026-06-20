@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { PublishArtifactSchema, UnpublishArtifactSchema } from "@/modules/library/schemas";
 import {
@@ -19,7 +19,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: sectionId } = await params;
     const body: unknown = await req.json();
     const parsed = PublishArtifactSchema.safeParse(body);
@@ -29,6 +29,8 @@ export async function POST(
     await publishArtifact(session.userId, parsed.data.artifactId, sectionId);
     return NextResponse.json(ok({ published: true }), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof SectionNotFoundError || err instanceof ArtifactNotFoundError)
@@ -45,7 +47,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: sectionId } = await params;
     const body: unknown = await req.json();
     const parsed = UnpublishArtifactSchema.safeParse(body);
@@ -55,6 +57,8 @@ export async function DELETE(
     await unpublishArtifact(session.userId, parsed.data.artifactId, sectionId);
     return NextResponse.json(ok({ unpublished: true }));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof SectionNotFoundError || err instanceof ArtifactNotFoundError)

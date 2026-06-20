@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import {
   listNotifications,
   getNotificationCounts,
@@ -12,7 +12,7 @@ import { ok, fail } from "@/types/common";
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const [notifications, counts] = await Promise.all([
       listNotifications(session.userId),
       getNotificationCounts(session.userId),
@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 
 export async function PATCH(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     await markAllRead(session.userId);
     return NextResponse.json(ok(null));
   } catch (err) {

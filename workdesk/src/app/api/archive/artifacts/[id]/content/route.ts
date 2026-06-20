@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { commitVersion, getArtifactDetails, ArtifactNotFoundError, updateArtifactFtsContent } from "@/modules/archive/services/archiveService";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
@@ -35,7 +35,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: artifactId } = await params;
 
     // allowShared=true: grantees can read text content too.
@@ -61,6 +61,8 @@ export async function GET(
     const content = await readTextContent(targetVersion.contentKey);
     return NextResponse.json(ok(content), { status: 200 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundError)
@@ -75,7 +77,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id: artifactId } = await params;
 
     const artifact = await getArtifactDetails(session.userId, artifactId);
@@ -107,6 +109,8 @@ export async function PUT(
 
     return NextResponse.json(ok(version), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundError)

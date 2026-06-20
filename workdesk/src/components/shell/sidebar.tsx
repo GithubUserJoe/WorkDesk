@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Megaphone, MessageSquare, BookOpen,
   GitFork, Archive, Users, Star, Trash2, UserCircle2,
-  Settings2, LogOut, Share2,
+  Settings2, LogOut, Share2, Building2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
@@ -32,6 +32,7 @@ const I = { size: 18, strokeWidth: 1.8, className: "shrink-0" } as const;
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard",       label: "Dashboard",     icon: <LayoutDashboard  {...I} /> },
+  { href: "/teams",           label: "Team Rooms",    icon: <Building2        {...I} /> },
   { href: "/bulletin",        label: "Bulletin",       icon: <Megaphone        {...I} /> },
   { href: "/messaging",       label: "Messages",       icon: <MessageSquare    {...I} /> },
   { href: "/library",         label: "Library",        icon: <BookOpen         {...I} /> },

@@ -303,6 +303,9 @@ export async function getGraphData(userId: string, teamView = false): Promise<Gr
     });
     if (a.set_id) {
       edges.push({ id: `e-${a.set_id}-${a.id}`, source: a.set_id, target: a.id, edgeType: "hierarchy" });
+    } else if (teamView && a.owner_id) {
+      // Orphan artifacts (no folder) attach directly to their member node in team view
+      edges.push({ id: `e-member-${a.owner_id}-${a.id}`, source: `member-${a.owner_id}`, target: a.id, edgeType: "hierarchy" });
     }
   });
 

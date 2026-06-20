@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { totalUnreadCount } from "@/modules/messaging/services/messagingService";
 
@@ -7,10 +7,12 @@ import { totalUnreadCount } from "@/modules/messaging/services/messagingService"
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const count = await totalUnreadCount(session.userId);
     return NextResponse.json(ok({ count }));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     console.error("[GET /api/messaging/unread]", err);

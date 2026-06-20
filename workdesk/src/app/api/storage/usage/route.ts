@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireAdminSession } from "@/lib/session";
+import { requireSession, requireRoomSession, requireAdminSession } from "@/lib/session";
 import {
   getStorageUsage,
   setUserQuota,
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(ok(usage));
     }
 
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const usage = await getStorageUsage(session.userId);
     return NextResponse.json(ok(usage));
   } catch (err) {

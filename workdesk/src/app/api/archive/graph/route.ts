@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { getGraphData } from "@/modules/relationships/services/relationshipService";
 
 // GET /api/archive/graph?teamView=true
 export async function GET(req: NextRequest) {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const teamView = req.nextUrl.searchParams.get("teamView") === "true";
     const data = await getGraphData(session.userId, teamView);
     return NextResponse.json(ok(data));

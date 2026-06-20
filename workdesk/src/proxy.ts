@@ -2,20 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { unsealData } from "iron-session";
 import { SessionData, SESSION_OPTIONS } from "@/lib/session";
 
-// Read-only: unseal the iron-session cookie directly.
-//
-// We deliberately do NOT use getIronSession(req.cookies, …) here. At the Next.js
-// edge runtime, NextRequest.cookies is not the cookie-store shape iron-session's
-// stateful API expects, and passing it throws "adapterFn is not a function".
-// The proxy only needs to read the session, so unsealData (stateless decrypt) is
-// the correct primitive. Returns an empty object if the cookie is absent/invalid.
+// Read-only: unseal the iron-session cookie directly at the edge.
+// We deliberately do NOT use getIronSession(req.cookies, …) here — at the
+// Next.js edge runtime the cookie-store shape iron-session expects is not
+// present on NextRequest.cookies. The proxy only reads, so unsealData
+// (stateless decrypt) is the correct primitive.
 async function readSession(req: NextRequest): Promise<Partial<SessionData>> {
   const sealed = req.cookies.get(SESSION_OPTIONS.cookieName)?.value;
   if (!sealed) return {};
   try {
-    return await unsealData<SessionData>(sealed, {
-      password: SESSION_OPTIONS.password,
-    });
+    return await unsealData<SessionData>(sealed, { password: SESSION_OPTIONS.password });
   } catch {
     // Tampered, expired, or rotated-secret cookie → treat as logged out.
     return {};
@@ -25,24 +21,31 @@ async function readSession(req: NextRequest): Promise<Partial<SessionData>> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Proxy — Edge Route Protection (Next.js 16 Proxy Convention)
 //
-// Runs at the Vercel/Next.js edge runtime before any page or route handler.
-// Reads the iron-session cookie and enforces three rules:
+// Three-layer enforcement mirrors the auth pattern exactly:
 //
-//   1. Unauthenticated access to protected routes → redirect to /login
-//   2. Authenticated access to auth routes (/login) → redirect to /dashboard
-//   3. Non-ADMIN access to /settings/admin → redirect to /dashboard
+//   Layer 1 (Edge / this file): cookie-based, zero DB cost.
+//   Layer 2 (Route handlers):   requireRoomSession() → 403 NO_ROOM.
+//   Layer 3 (App layout):       server-side redirect (belt-and-suspenders).
 //
-// The proxy only reads the cookie — it never writes or destroys it.
-// Writes happen in route handlers (login, logout, session).
+// Gate rules (evaluated top-to-bottom, first match wins):
 //
-// Matcher excludes:
-//   - _next/static  — built assets
-//   - _next/image   — image optimisation
-//   - favicon.ico   — browser default
-//   - /api/auth/*   — auth endpoints must be publicly reachable
+//   1. Admin-only routes   → must be logged in + ADMIN.
+//   2. Room-exempt routes  → must be logged in; room check skipped.
+//        • /onboarding, /teams — onboarding flow pages
+//        • /api/teams/*        — room membership mutations
+//        • /api/auth/refresh-room — stamps hasRoom back into the cookie
+//   3. Protected routes    → must be logged in AND hasRoom.
+//        If logged in but hasRoom=false → redirect to /onboarding.
+//   4. Auth routes (/login etc.) → redirect if already logged in.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Routes that require authentication (any role).
+// Pages that need auth but NOT a room (the onboarding path).
+const ROOM_EXEMPT_PAGES = ["/onboarding", "/teams"];
+
+// API prefixes that need auth but NOT a room check.
+const ROOM_EXEMPT_API_PREFIXES = ["/api/teams", "/api/auth/refresh-room"];
+
+// Routes that require auth + room.
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/archive",
@@ -59,42 +62,57 @@ const PROTECTED_PREFIXES = [
 // Routes restricted to ADMIN role only.
 const ADMIN_ONLY_PREFIXES = ["/settings/admin"];
 
-// Routes that should redirect authenticated users away (e.g. login page).
+// Routes that redirect authenticated users away (login, password reset, etc.).
 const AUTH_ROUTES = ["/login", "/forgot-password", "/reset-password"];
 
 export async function proxy(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
-
-  // Read session from the incoming request cookies (stateless unseal).
   const res = NextResponse.next();
   const session = await readSession(req);
 
   const isLoggedIn = session.isLoggedIn === true && Boolean(session.userId);
-  const isAdmin = isLoggedIn && session.role === "ADMIN";
+  const isAdmin    = isLoggedIn && session.role === "ADMIN";
+  const hasRoom    = isLoggedIn && session.hasRoom === true;
 
-  // ── Rule 1: Admin-only routes ──────────────────────────────────────────────
-  if (ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-    if (!isLoggedIn) {
-      return redirectToLogin(req);
-    }
-    if (!isAdmin) {
+  // ── Rule 1: Admin-only pages ───────────────────────────────────────────────
+  if (ADMIN_ONLY_PREFIXES.some(p => pathname.startsWith(p))) {
+    if (!isLoggedIn) return redirectToLogin(req);
+    if (!isAdmin)    return NextResponse.redirect(new URL("/dashboard", req.url));
+    return res;
+  }
+
+  // ── Rule 2: Room-exempt routes (auth required, room NOT required) ──────────
+  const isRoomExemptPage = ROOM_EXEMPT_PAGES.some(
+    p => pathname === p || pathname.startsWith(p + "/")
+  );
+  const isRoomExemptApi = ROOM_EXEMPT_API_PREFIXES.some(
+    p => pathname === p || pathname.startsWith(p + "/")
+  );
+
+  if (isRoomExemptPage || isRoomExemptApi) {
+    if (!isLoggedIn) return redirectToLogin(req);
+    // If the user already has a room and navigates directly to /onboarding,
+    // send them to the dashboard — the gate is already passed.
+    if (pathname.startsWith("/onboarding") && hasRoom) {
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
     return res;
   }
 
-  // ── Rule 2: Protected routes (any authenticated user) ─────────────────────
-  if (PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-    if (!isLoggedIn) {
-      return redirectToLogin(req);
-    }
+  // ── Rule 3: Protected routes (auth + room required) ────────────────────────
+  if (PROTECTED_PREFIXES.some(p => pathname.startsWith(p))) {
+    if (!isLoggedIn) return redirectToLogin(req);
+    if (!hasRoom)    return NextResponse.redirect(new URL("/onboarding", req.url));
     return res;
   }
 
-  // ── Rule 3: Auth routes (redirect if already logged in) ───────────────────
-  if (AUTH_ROUTES.some((route) => pathname.startsWith(route))) {
+  // ── Rule 4: Auth routes (redirect away if already logged in) ──────────────
+  if (AUTH_ROUTES.some(r => pathname.startsWith(r))) {
     if (isLoggedIn) {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+      // Logged in but no room → onboarding; logged in with room → dashboard.
+      return NextResponse.redirect(
+        new URL(hasRoom ? "/dashboard" : "/onboarding", req.url)
+      );
     }
     return res;
   }
@@ -108,17 +126,20 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
 
 function redirectToLogin(req: NextRequest): NextResponse {
   const loginUrl = new URL("/login", req.url);
-  // Preserve the originally requested path so login can redirect back.
   loginUrl.searchParams.set("from", req.nextUrl.pathname);
   return NextResponse.redirect(loginUrl);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Matcher Config
+//
+// Excludes static assets and all public auth endpoints (login, signup, OTP
+// flows, password reset) so they remain reachable without a session cookie.
+// /api/auth/refresh-room and /api/teams/* are matched (covered by Rule 2).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/auth/login|api/auth/logout|api/auth/signup|api/auth/forgot-password|api/auth/reset-password|api/auth/send-email-otp|api/auth/verify-email-otp|api/auth/send-password-otp|api/auth/verify-password-otp).*)",
   ],
 };

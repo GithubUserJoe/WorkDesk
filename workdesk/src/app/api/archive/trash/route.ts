@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { requireSession, requireRoomSession } from "@/lib/session";
 import {
   listTrash,
   restoreFromTrash,
@@ -18,7 +18,7 @@ import { ok, fail } from "@/types/common";
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     // Purge expired items first (lazy, non-blocking errors)
     await purgeExpiredTrash(session.userId).catch((e) =>
       console.error("[Trash] Purge error:", e)
@@ -42,7 +42,7 @@ export async function GET(): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body = await req.json();
     const parsed = TrashActionSchema.safeParse({ ...body, action: "restore" });
     if (!parsed.success) {
@@ -70,7 +70,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { searchParams } = req.nextUrl;
     const parsed = TrashActionSchema.safeParse({
       kind: searchParams.get("kind"),

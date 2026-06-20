@@ -10,49 +10,56 @@ import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   label: string;
-  kind: "set" | "artifact";
+  kind: "member" | "set" | "artifact";
   artifact_type?: string;
   set_id?: string | null;
   visibility?: string;
   set_name?: string | null;
   parent_id?: string | null;
+  owner_id?: string;
+  owner_name?: string;
 }
 
 interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
   source: string | GraphNode;
   target: string | GraphNode;
-  type: "set-parent" | "artifact-set";
+  type: "set-parent" | "artifact-set" | "member-item";
 }
 
-// ── Colour palette — constellation / space aesthetic ──────────────────────────
+// ── Colour palette ────────────────────────────────────────────────────────────
 
 const NODE_COLOR: Record<string, string> = {
-  set:      "#58A6FF",   // blue star (larger)
-  document: "#8B949E",   // grey dwarf
-  pdf:      "#F85149",   // red giant
-  image:    "#3FB950",   // green star
-  video:    "#D29922",   // amber star
-  archive:  "#A371F7",   // purple nebula
-  docx:     "#79c0ff",   // light blue
-  pptx:     "#ffa657",   // orange
-  zip:      "#8b949e",   // grey
+  member:   "#bc8cff",
+  set:      "#58A6FF",
+  document: "#8B949E",
+  pdf:      "#F85149",
+  image:    "#3FB950",
+  video:    "#D29922",
+  archive:  "#A371F7",
+  docx:     "#79c0ff",
+  pptx:     "#ffa657",
+  zip:      "#8b949e",
   other:    "#8B949E",
 };
 
 function nodeColor(n: GraphNode): string {
-  if (n.kind === "set") return NODE_COLOR.set;
+  if (n.kind === "member") return NODE_COLOR.member;
+  if (n.kind === "set")    return NODE_COLOR.set;
   const t = (n.artifact_type ?? "other").toLowerCase();
   return NODE_COLOR[t] ?? NODE_COLOR.other;
 }
 
 function nodeRadius(n: GraphNode): number {
-  return n.kind === "set" ? 11 : 6;
+  if (n.kind === "member") return 18;
+  if (n.kind === "set")    return 11;
+  return 6;
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
 
-function Legend() {
+function Legend({ teamView }: { teamView: boolean }) {
   const items = [
+    ...(teamView ? [{ color: NODE_COLOR.member, label: "Member" }] : []),
     { color: NODE_COLOR.set,      label: "Set" },
     { color: NODE_COLOR.document, label: "Document" },
     { color: NODE_COLOR.pdf,      label: "PDF" },
@@ -67,7 +74,7 @@ function Legend() {
       border: "1px solid #30363d", borderRadius: 8,
       padding: "8px 12px", fontFamily: "Inter, sans-serif",
     }}>
-      <p style={{ fontSize: 9, color: "#8b949e", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6, margin: "0 0 6px" }}>Legend</p>
+      <p style={{ fontSize: 9, color: "#8b949e", textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 6px" }}>Legend</p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 16px" }}>
         {items.map(i => (
           <div key={i.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -94,10 +101,17 @@ function Tooltip({ node, x, y }: { node: GraphNode; x: number; y: number }) {
     }}>
       <p style={{ fontSize: 12, fontWeight: 600, color: "#e6edf3", margin: 0 }}>{node.label}</p>
       <p style={{ fontSize: 10, color: "#8b949e", margin: "2px 0 0" }}>
-        {node.kind === "set" ? "Set" : (node.artifact_type?.toUpperCase() ?? "Artifact")}
+        {node.kind === "member"
+          ? "Team member"
+          : node.kind === "set"
+          ? "Set"
+          : (node.artifact_type?.toUpperCase() ?? "Artifact")}
         {node.set_name ? ` · ${node.set_name}` : ""}
+        {node.owner_name && node.kind === "artifact" ? ` · by ${node.owner_name}` : ""}
       </p>
-      <p style={{ fontSize: 10, color: "#58a6ff", margin: "3px 0 0" }}>Double-click to open</p>
+      {node.kind !== "member" && (
+        <p style={{ fontSize: 10, color: "#58a6ff", margin: "3px 0 0" }}>Double-click to open</p>
+      )}
     </div>
   );
 }
@@ -110,21 +124,21 @@ interface Props {
 
 export function FloatingCanvas({ search }: Props) {
   const router = useRouter();
-  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const simRef     = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
+  const simRef       = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
   const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
-  const nodesRef   = useRef<GraphNode[]>([]);
-  const edgesRef   = useRef<GraphEdge[]>([]);
-  const zoomRef    = useRef<d3.ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
-  // stable ref for raw data — filter applies when search changes
-  const rawNodesRef = useRef<GraphNode[]>([]);
-  const rawEdgesRef = useRef<GraphEdge[]>([]);
+  const nodesRef     = useRef<GraphNode[]>([]);
+  const edgesRef     = useRef<GraphEdge[]>([]);
+  const zoomRef      = useRef<d3.ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
+  const rawNodesRef  = useRef<GraphNode[]>([]);
+  const rawEdgesRef  = useRef<GraphEdge[]>([]);
 
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
   const [nodeCount, setNodeCount] = useState(0);
-  const [tooltip, setTooltip] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
+  const [tooltip,   setTooltip]   = useState<{ node: GraphNode; x: number; y: number } | null>(null);
+  const [teamView,  setTeamView]  = useState(false);
 
   // ── draw ──────────────────────────────────────────────────────────────────
   const draw = useCallback(() => {
@@ -137,7 +151,6 @@ export function FloatingCanvas({ search }: Props) {
     ctx.save();
     ctx.clearRect(0, 0, width, height);
 
-    // Starfield background — draw once, very cheap
     const t = transformRef.current;
     ctx.translate(t.x, t.y);
     ctx.scale(t.k, t.k);
@@ -153,7 +166,10 @@ export function FloatingCanvas({ search }: Props) {
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(tg.x, tg.y);
-      if (edge.type === "set-parent") {
+      if (edge.type === "member-item") {
+        ctx.strokeStyle = "rgba(188,140,255,0.25)";
+        ctx.lineWidth = 1.2;
+      } else if (edge.type === "set-parent") {
         ctx.strokeStyle = "rgba(88,166,255,0.35)";
         ctx.lineWidth = 1.5;
       } else {
@@ -169,8 +185,21 @@ export function FloatingCanvas({ search }: Props) {
       const r     = nodeRadius(node);
       const color = nodeColor(node);
 
-      if (node.kind === "set") {
-        // Outer glow ring
+      if (node.kind === "member") {
+        const grad = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, r * 3.5);
+        grad.addColorStop(0, color + "33");
+        grad.addColorStop(1, color + "00");
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r * 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = color + "66";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else if (node.kind === "set") {
         const grad = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, r * 2.8);
         grad.addColorStop(0, color + "44");
         grad.addColorStop(1, color + "00");
@@ -179,7 +208,6 @@ export function FloatingCanvas({ search }: Props) {
         ctx.fillStyle = grad;
         ctx.fill();
 
-        // Pulse ring
         ctx.beginPath();
         ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = color + "55";
@@ -187,33 +215,33 @@ export function FloatingCanvas({ search }: Props) {
         ctx.stroke();
       }
 
-      // Core
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
 
-      // Dark outline
       ctx.strokeStyle = "rgba(13,17,23,0.6)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
-      // Labels — only at sufficient zoom
-      if (t.k > 0.55) {
-        const isSet = node.kind === "set";
-        ctx.fillStyle = isSet ? "#e6edf3" : "#8b949e";
-        ctx.font = `${isSet ? 600 : 400} ${isSet ? 11 : 10}px Inter, sans-serif`;
+      // Labels — members always visible; sets/artifacts at sufficient zoom
+      if (node.kind === "member" || t.k > 0.55) {
+        const isMember = node.kind === "member";
+        const isSet    = node.kind === "set";
+        ctx.fillStyle = isMember ? "#e6edf3" : isSet ? "#e6edf3" : "#8b949e";
+        ctx.font = `${isMember ? 700 : isSet ? 600 : 400} ${isMember ? 13 : isSet ? 11 : 10}px Inter, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        const lbl = node.label.length > 24 ? node.label.slice(0, 22) + "…" : node.label;
-        ctx.fillText(lbl, node.x, node.y + r + 3);
+        const maxLen = isMember ? 20 : 24;
+        const lbl = node.label.length > maxLen ? node.label.slice(0, maxLen - 2) + "…" : node.label;
+        ctx.fillText(lbl, node.x, node.y + r + (isMember ? 5 : 3));
       }
     }
 
     ctx.restore();
   }, []);
 
-  // ── apply search filter to raw data ───────────────────────────────────────
+  // ── apply search filter ────────────────────────────────────────────────────
   const applyFilter = useCallback((q: string) => {
     const allNodes = rawNodesRef.current;
     const allEdges = rawEdgesRef.current;
@@ -222,17 +250,19 @@ export function FloatingCanvas({ search }: Props) {
       edgesRef.current = allEdges;
     } else {
       const lq = q.toLowerCase();
-      const visible = allNodes.filter(n => n.label.toLowerCase().includes(lq));
-      const ids = new Set(visible.map(n => n.id));
-      nodesRef.current = visible;
+      const matchIds = new Set(
+        allNodes.filter(n => n.label.toLowerCase().includes(lq)).map(n => n.id)
+      );
+      // Always keep member nodes so the graph stays coherent
+      allNodes.filter(n => n.kind === "member").forEach(n => matchIds.add(n.id));
+      nodesRef.current = allNodes.filter(n => matchIds.has(n.id));
       edgesRef.current = allEdges.filter(e => {
         const sId = typeof e.source === "string" ? e.source : (e.source as GraphNode).id;
         const tId = typeof e.target === "string" ? e.target : (e.target as GraphNode).id;
-        return ids.has(sId) && ids.has(tId);
+        return matchIds.has(sId) && matchIds.has(tId);
       });
     }
     setNodeCount(nodesRef.current.length);
-    // Restart sim with filtered nodes
     if (simRef.current) {
       simRef.current.nodes(nodesRef.current);
       (simRef.current.force("link") as d3.ForceLink<GraphNode, GraphEdge>).links(edgesRef.current);
@@ -240,65 +270,106 @@ export function FloatingCanvas({ search }: Props) {
     }
   }, []);
 
-  // ── load data + init sim ──────────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
+  // ── load + build sim ──────────────────────────────────────────────────────
+  const loadData = useCallback(async (tv: boolean) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/graph?teamView=${tv}`);
+      if (!res.ok) throw new Error("Failed to load graph");
+      const data = await res.json() as { nodes: GraphNode[]; edges: GraphEdge[] };
 
-    async function load() {
-      try {
-        const res = await fetch("/api/graph");
-        if (!res.ok) throw new Error("Failed to load graph");
-        const data = await res.json() as { nodes: GraphNode[]; edges: GraphEdge[] };
-        if (cancelled) return;
+      rawNodesRef.current = data.nodes;
+      rawEdgesRef.current = data.edges;
 
-        rawNodesRef.current = data.nodes;
-        rawEdgesRef.current = data.edges;
+      const canvas = canvasRef.current!;
+      const W = canvas.clientWidth  || 800;
+      const H = canvas.clientHeight || 600;
 
-        const canvas = canvasRef.current!;
-        const W = canvas.width  || canvas.clientWidth  || 800;
-        const H = canvas.height || canvas.clientHeight || 600;
-
+      if (tv) {
+        // Spread members evenly, seed their children nearby
+        const members = data.nodes.filter(n => n.kind === "member");
+        const count   = members.length || 1;
+        members.forEach((m, i) => {
+          m.x = W * (i + 1) / (count + 1);
+          m.y = H / 2;
+        });
+        // Build a direct parent map for seeding initial positions
+        const memberPos = new Map(members.map(m => [m.id, { x: m.x!, y: m.y! }]));
+        const edgeSrcMap = new Map<string, string>();
+        data.edges.forEach(e => {
+          const src = typeof e.source === "string" ? e.source : (e.source as GraphNode).id;
+          const tgt = typeof e.target === "string" ? e.target : (e.target as GraphNode).id;
+          if (src.startsWith("member-")) edgeSrcMap.set(tgt, src);
+        });
+        data.nodes.filter(n => n.kind !== "member").forEach(n => {
+          const mId  = edgeSrcMap.get(n.id);
+          const mPos = mId ? memberPos.get(mId) : undefined;
+          n.x = (mPos?.x ?? W / 2) + (Math.random() - 0.5) * 120;
+          n.y = (mPos?.y ?? H / 2) + (Math.random() - 0.5) * 120;
+        });
+      } else {
         data.nodes.forEach(n => {
           n.x = W / 2 + (Math.random() - 0.5) * 300;
           n.y = H / 2 + (Math.random() - 0.5) * 300;
         });
-
-        nodesRef.current = data.nodes;
-        edgesRef.current = data.edges;
-        setNodeCount(data.nodes.length);
-
-        const sim = d3.forceSimulation<GraphNode>(data.nodes)
-          .force("link", d3.forceLink<GraphNode, GraphEdge>(data.edges)
-            .id(n => n.id)
-            .distance(d => (d as GraphEdge).type === "set-parent" ? 90 : 55)
-            .strength(0.45)
-          )
-          .force("charge", d3.forceManyBody<GraphNode>()
-            .strength(n => (n as GraphNode).kind === "set" ? -220 : -70)
-          )
-          .force("center", d3.forceCenter(W / 2, H / 2))
-          .force("collision", d3.forceCollide<GraphNode>()
-            .radius(n => nodeRadius(n as GraphNode) + 10)
-          )
-          .on("tick", draw)
-          .on("end", draw);
-
-        simRef.current = sim;
-        setLoading(false);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
-        setLoading(false);
       }
-    }
 
-    void load();
-    return () => {
-      cancelled = true;
+      nodesRef.current = data.nodes;
+      edgesRef.current = data.edges;
+      setNodeCount(data.nodes.length);
+
       simRef.current?.stop();
-    };
+
+      const sim = d3.forceSimulation<GraphNode>(data.nodes)
+        .force("link", d3.forceLink<GraphNode, GraphEdge>(data.edges)
+          .id(n => n.id)
+          .distance(d => {
+            const type = (d as GraphEdge).type;
+            if (type === "member-item") return 150;
+            if (type === "set-parent")  return 90;
+            return 55;
+          })
+          .strength(d => (d as GraphEdge).type === "member-item" ? 0.55 : 0.45)
+        )
+        .force("charge", d3.forceManyBody<GraphNode>()
+          .strength(n => {
+            const gn = n as GraphNode;
+            if (gn.kind === "member") return -600;
+            if (gn.kind === "set")    return -220;
+            return -70;
+          })
+        )
+        .force("center", d3.forceCenter(W / 2, H / 2))
+        .force("collision", d3.forceCollide<GraphNode>()
+          .radius(n => nodeRadius(n as GraphNode) + 12)
+        )
+        .on("tick", draw)
+        .on("end", draw);
+
+      simRef.current = sim;
+      setLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+      setLoading(false);
+    }
   }, [draw]);
 
-  // ── re-filter when search prop changes ───────────────────────────────────
+  // Initial load
+  useEffect(() => {
+    void loadData(false);
+    return () => { simRef.current?.stop(); };
+  // loadData is stable (useCallback with [draw]), safe to run once
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reload on teamView toggle
+  useEffect(() => {
+    void loadData(teamView);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamView]);
+
+  // Re-filter on search change
   useEffect(() => {
     if (!loading) applyFilter(search);
   }, [search, loading, applyFilter]);
@@ -308,7 +379,6 @@ export function FloatingCanvas({ search }: Props) {
     const container = containerRef.current;
     const canvas    = canvasRef.current;
     if (!container || !canvas) return;
-
     const ro = new ResizeObserver(entries => {
       const { width, height } = entries[0].contentRect;
       const dpr = window.devicePixelRatio;
@@ -334,12 +404,11 @@ export function FloatingCanvas({ search }: Props) {
       .on("zoom", e => { transformRef.current = e.transform as d3.ZoomTransform; draw(); });
     zoomRef.current = zoom;
     const sel = d3.select(canvas).call(zoom);
-    // Disable D3's built-in double-click zoom so our dblclick handler works
     sel.on("dblclick.zoom", null);
     return () => { d3.select(canvas).on(".zoom", null); };
   }, [draw]);
 
-  // ── drag + click + hover ──────────────────────────────────────────────────
+  // ── drag + hover + dblclick ───────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -360,12 +429,10 @@ export function FloatingCanvas({ search }: Props) {
     }
 
     let dragNode: GraphNode | null = null;
-    let moved = false;
 
     function onMouseDown(e: MouseEvent) {
       const rect = cv.getBoundingClientRect();
       dragNode = hitNode(e.clientX - rect.left, e.clientY - rect.top);
-      moved = false;
       if (dragNode) {
         simRef.current?.alphaTarget(0.3).restart();
         dragNode.fx = dragNode.x;
@@ -378,7 +445,6 @@ export function FloatingCanvas({ search }: Props) {
       const rect = cv.getBoundingClientRect();
       const t    = transformRef.current;
       if (dragNode) {
-        moved = true;
         dragNode.fx = (e.clientX - rect.left - t.x) / t.k;
         dragNode.fy = (e.clientY - rect.top  - t.y) / t.k;
         return;
@@ -405,7 +471,7 @@ export function FloatingCanvas({ search }: Props) {
     function onDblClick(e: MouseEvent) {
       const rect = cv.getBoundingClientRect();
       const node = hitNode(e.clientX - rect.left, e.clientY - rect.top);
-      if (!node) return;
+      if (!node || node.kind === "member") return;
       if (node.kind === "set") router.push(`/archive?set=${node.id}`);
       else router.push(`/archive/${node.id}`);
     }
@@ -440,6 +506,46 @@ export function FloatingCanvas({ search }: Props) {
     <div ref={containerRef} style={{ position: "relative", width: "100%", height: "100%", background: "#0d1117", overflow: "hidden" }}>
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
 
+      {/* ── Team view toggle ── */}
+      <div style={{
+        position: "absolute", top: 16, left: "50%", transform: "translateX(-50%)",
+        zIndex: 10, display: "flex", alignItems: "center", gap: 10,
+        background: "#161b22cc", border: "1px solid #30363d",
+        borderRadius: 10, padding: "8px 14px",
+        backdropFilter: "blur(8px)",
+        boxShadow: "0 4px 20px #00000066",
+        fontFamily: "Inter, sans-serif",
+      }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
+          <div
+            onClick={() => setTeamView(v => !v)}
+            style={{
+              width: 32, height: 18, borderRadius: 9,
+              background: teamView ? "#1f6feb" : "#21262d",
+              border: `1px solid ${teamView ? "#388bfd" : "#30363d"}`,
+              position: "relative", cursor: "pointer",
+              transition: "background 0.2s ease",
+            }}
+          >
+            <div style={{
+              width: 12, height: 12, borderRadius: "50%", background: "#e6edf3",
+              position: "absolute", top: 2,
+              left: teamView ? 16 : 2,
+              transition: "left 0.2s ease",
+            }} />
+          </div>
+          <span style={{ fontSize: 11, color: teamView ? "#79c0ff" : "#8b949e", fontWeight: 500 }}>
+            Team view
+          </span>
+        </label>
+
+        <div style={{ width: 1, height: 20, background: "#30363d" }} />
+
+        <span style={{ fontSize: 10, color: "#6e7681", userSelect: "none", whiteSpace: "nowrap" }}>
+          Drag to move · Scroll to zoom · Double-click to open
+        </span>
+      </div>
+
       {/* Zoom controls */}
       <div style={{
         position: "absolute", top: 16, right: 16, zIndex: 10,
@@ -463,7 +569,9 @@ export function FloatingCanvas({ search }: Props) {
       {loading && (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
           <div style={{ width: 24, height: 24, border: "2.5px solid #30363d", borderTopColor: "#58a6ff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-          <p style={{ fontSize: 13, color: "#8b949e", fontFamily: "Inter, sans-serif" }}>Building constellation…</p>
+          <p style={{ fontSize: 13, color: "#8b949e", fontFamily: "Inter, sans-serif" }}>
+            {teamView ? "Loading team constellation…" : "Building constellation…"}
+          </p>
         </div>
       )}
 
@@ -475,12 +583,16 @@ export function FloatingCanvas({ search }: Props) {
 
       {!loading && nodeCount === 0 && (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, textAlign: "center" }}>
-          <p style={{ fontSize: 14, fontWeight: 600, color: "#e6edf3", fontFamily: "Inter, sans-serif" }}>Nothing to show</p>
-          <p style={{ fontSize: 12, color: "#8b949e", fontFamily: "Inter, sans-serif" }}>Create sets and artifacts in your Archive first.</p>
+          <p style={{ fontSize: 14, fontWeight: 600, color: "#e6edf3", fontFamily: "Inter, sans-serif" }}>
+            {teamView ? "No team members have published to the Library yet." : "Nothing to show"}
+          </p>
+          {!teamView && (
+            <p style={{ fontSize: 12, color: "#8b949e", fontFamily: "Inter, sans-serif" }}>Create sets and artifacts in your Archive first.</p>
+          )}
         </div>
       )}
 
-      <Legend />
+      <Legend teamView={teamView} />
 
       {tooltip && !loading && (
         <Tooltip node={tooltip.node} x={tooltip.x} y={tooltip.y} />
@@ -492,7 +604,7 @@ export function FloatingCanvas({ search }: Props) {
         background: "rgba(22,27,34,0.8)", backdropFilter: "blur(4px)",
         border: "1px solid #30363d", borderRadius: 5, padding: "3px 8px",
       }}>
-        Drag to move · Scroll to zoom · Double-click to open
+        {nodeCount} node{nodeCount !== 1 ? "s" : ""}
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

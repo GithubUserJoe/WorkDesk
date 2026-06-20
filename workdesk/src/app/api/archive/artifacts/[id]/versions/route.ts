@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireRoomSession, NoRoomError } from "@/lib/session";
 import {
   commitVersion,
   restoreVersion,
@@ -21,7 +21,7 @@ interface RouteParams {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
 
     // Validate path param ID
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 // ─────────────────────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const { id } = await params;
 
     // Validate path param ID

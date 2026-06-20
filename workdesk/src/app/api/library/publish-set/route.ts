@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
 import {
@@ -14,7 +14,7 @@ const Schema = z.object({ setId: z.string().uuid() });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
+    const session = await requireRoomSession();
     const body: unknown = await req.json();
     const parsed = Schema.safeParse(body);
     if (!parsed.success)
@@ -23,6 +23,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const result = await publishSetToLibrary(session.userId, parsed.data.setId);
     return NextResponse.json(ok(result), { status: 201 });
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     if (err instanceof ArtifactNotFoundError)

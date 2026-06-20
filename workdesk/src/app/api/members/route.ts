@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, UnauthenticatedError } from "@/lib/session";
+import { requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
 import { query } from "@/lib/db";
 import { ok, fail } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/members
-// Returns id + name + email for all ACTIVE users (excluding the caller).
-// Used by any member to pick assignees, share recipients, etc.
+//
+// Returns id + name + email for all ACTIVE users who share at least one Team
+// Room with the caller, excluding the caller themselves.
+//
+// Room scoping: any user visible here is guaranteed to be in a common room,
+// so messaging, sharing, assignment, and bulletin flows only surface teammates.
+//
+// Query string:
+//   ?roomId=<uuid>  — optional; restricts results to a specific room.
+//                     Caller must be a member of that room or returns 403.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface MemberSummary {
@@ -15,17 +23,56 @@ export interface MemberSummary {
   email: string;
 }
 
-export async function GET(_req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireSession();
-    const members = await query<MemberSummary>(
-      `SELECT id, name, email FROM users
-       WHERE status = 'ACTIVE' AND id <> $1
-       ORDER BY name`,
-      [session.userId]
-    );
+    const session = await requireRoomSession();
+    const { searchParams } = new URL(req.url);
+    const roomId = searchParams.get("roomId");
+
+    let members: MemberSummary[];
+
+    if (roomId) {
+      // Scope to a specific room — verify caller belongs to it first.
+      const memberCheck = await query<{ user_id: string }>(
+        `SELECT user_id FROM room_memberships WHERE room_id = $1 AND user_id = $2`,
+        [roomId, session.userId]
+      );
+      if (memberCheck.length === 0) {
+        return NextResponse.json(
+          fail("ROOM_NOT_FOUND", "Room not found or you are not a member."),
+          { status: 403 }
+        );
+      }
+
+      members = await query<MemberSummary>(
+        `SELECT u.id, u.name, u.email
+         FROM room_memberships rm
+         JOIN users u ON u.id = rm.user_id
+         WHERE rm.room_id = $1
+           AND u.status = 'ACTIVE'
+           AND u.id <> $2
+         ORDER BY u.name`,
+        [roomId, session.userId]
+      );
+    } else {
+      // Default: everyone who shares any room with the caller.
+      members = await query<MemberSummary>(
+        `SELECT DISTINCT u.id, u.name, u.email
+         FROM room_memberships caller_rm
+         JOIN room_memberships peer_rm ON peer_rm.room_id = caller_rm.room_id
+         JOIN users u ON u.id = peer_rm.user_id
+         WHERE caller_rm.user_id = $1
+           AND u.status = 'ACTIVE'
+           AND u.id <> $1
+         ORDER BY u.name`,
+        [session.userId]
+      );
+    }
+
     return NextResponse.json(ok(members));
   } catch (err) {
+    if (err instanceof NoRoomError)
+      return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });
     console.error("[GET /api/members]", err);
