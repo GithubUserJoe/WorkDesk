@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — ignore all, then explicitly re-track the safe example template
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -40,5 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local dev file uploads (USE_LOCAL_STORAGE=true)
+# local dev file uploads (local filesystem storage backend, USE_LOCAL_STORAGE=true)
+# Files land at uploads/{contentKey} — never commit user data
 /uploads
+
+# alternative local storage root (defence-in-depth if path ever changes)
+/.local-storage
