@@ -2,6 +2,7 @@ import { query, queryOne, transaction } from "@/lib/db";
 import { emitActivityEvent } from "@/modules/activity/services/activityService";
 import { emitNotification } from "@/modules/notifications/services/notificationService";
 import type { ConversationSummary, ConversationDetail, MessageItem } from "../types";
+import type { PaginatedResult } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Messaging Service — 1:1 internal conversations
@@ -103,28 +104,43 @@ export async function getOrCreateConversation(
 
 // ── listConversations ─────────────────────────────────────────────────────────
 
-export async function listConversations(userId: string): Promise<ConversationSummary[]> {
-  const rows = await query<ConvRow>(
-    `SELECT c.id,
-            other_u.id    AS other_user_id,
-            other_u.name  AS other_user_name,
-            other_u.email AS other_user_email,
-            (SELECT m.body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-            (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at,
-            (SELECT COUNT(*) FROM messages m
-             WHERE m.conversation_id = c.id
-               AND m.created_at > me.last_read_at
-               AND m.sender_id <> $1) AS unread_count,
-            c.updated_at
-     FROM conversations c
-     JOIN conversation_members me    ON me.conversation_id = c.id AND me.user_id = $1
-     JOIN conversation_members other ON other.conversation_id = c.id AND other.user_id <> $1
-     JOIN users other_u              ON other_u.id = other.user_id
-     ORDER BY c.updated_at DESC`,
-    [userId]
-  );
+export async function listConversations(
+  userId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<PaginatedResult<ConversationSummary>> {
+  const limit  = Math.min(options.limit  ?? 50, 200);
+  const offset = options.offset ?? 0;
 
-  return rows.map((r) => ({
+  const [rows, countRows] = await Promise.all([
+    query<ConvRow>(
+      `SELECT c.id,
+              other_u.id    AS other_user_id,
+              other_u.name  AS other_user_name,
+              other_u.email AS other_user_email,
+              (SELECT m.body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+              (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at,
+              (SELECT COUNT(*) FROM messages m
+               WHERE m.conversation_id = c.id
+                 AND m.created_at > me.last_read_at
+                 AND m.sender_id <> $1) AS unread_count,
+              c.updated_at
+       FROM conversations c
+       JOIN conversation_members me    ON me.conversation_id = c.id AND me.user_id = $1
+       JOIN conversation_members other ON other.conversation_id = c.id AND other.user_id <> $1
+       JOIN users other_u              ON other_u.id = other.user_id
+       ORDER BY c.updated_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    ),
+    query<{ total: string }>(
+      `SELECT COUNT(*) AS total
+       FROM conversations c
+       JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1`,
+      [userId]
+    ),
+  ]);
+
+  const items = rows.map((r) => ({
     id: r.id,
     otherUserId: r.other_user_id,
     otherUserName: r.other_user_name,
@@ -134,6 +150,8 @@ export async function listConversations(userId: string): Promise<ConversationSum
     unreadCount: Number(r.unread_count),
     updatedAt: r.updated_at,
   }));
+  const total = parseInt(countRows[0]?.total ?? "0", 10);
+  return { items, total, hasMore: offset + items.length < total, limit, offset };
 }
 
 // ── getConversation ───────────────────────────────────────────────────────────

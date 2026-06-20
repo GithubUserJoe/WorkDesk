@@ -40,7 +40,8 @@ function ConversationList({
   onSelect: (id: string) => void;
   onCompose: () => void;
 }) {
-  const { data: convos, isLoading, error } = useConversations();
+  const { data: convosPage, isLoading, error } = useConversations();
+  const convos = convosPage?.items;
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-border-default">

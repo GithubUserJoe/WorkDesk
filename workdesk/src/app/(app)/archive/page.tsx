@@ -61,10 +61,11 @@ function ArchiveInner() {
     setSelectedArtifactId(prev => prev === id ? null : id);
   }
 
-  const { data: artifacts = [], isLoading } = useArtifacts({
+  const { data: artifactsPage, isLoading } = useArtifacts({
     setId: activeSetId,
     search: search.trim() || undefined,
   });
+  const artifacts = artifactsPage?.items ?? [];
 
   const filtered = search.trim()
     ? artifacts.filter(a => a.title.toLowerCase().includes(search.toLowerCase()))

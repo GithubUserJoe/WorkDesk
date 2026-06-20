@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type { LibrarySectionSummary, LibraryArtifactItem } from "./types";
+import type { PaginatedResult } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Library hooks
@@ -16,9 +17,9 @@ const libKeys = {
 };
 
 export function useLibrarySections() {
-  return useQuery<LibrarySectionSummary[]>({
+  return useQuery<PaginatedResult<LibrarySectionSummary>>({
     queryKey: libKeys.sections(),
-    queryFn: () => api.get<LibrarySectionSummary[]>("/api/library/sections"),
+    queryFn: () => api.get<PaginatedResult<LibrarySectionSummary>>("/api/library/sections"),
     staleTime: 30_000,
   });
 }

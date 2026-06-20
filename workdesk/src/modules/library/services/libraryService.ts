@@ -2,6 +2,7 @@ import { query, queryOne, transaction } from "@/lib/db";
 import { AuditAction } from "@/lib/enums";
 import { emitNotification } from "@/modules/notifications/services/notificationService";
 import type { LibrarySectionSummary, LibraryArtifactItem } from "../types";
+import type { PaginatedResult } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Library Service
@@ -116,24 +117,40 @@ function rowToArtifact(r: ArtifactRow): LibraryArtifactItem {
 
 // ── listSections ──────────────────────────────────────────────────────────────
 
-export async function listSections(userId: string): Promise<LibrarySectionSummary[]> {
-  const rows = await query<SectionRow>(
-    `SELECT ls.id, ls.name, ls.description, ls.created_by,
-            u.name AS created_by_name,
-            COUNT(DISTINCT la.artifact_id) AS artifact_count,
-            COUNT(DISTINCT sub.user_id)    AS subscriber_count,
-            EXISTS(SELECT 1 FROM library_subscriptions s2
-                   WHERE s2.section_id = ls.id AND s2.user_id = $1) AS is_subscribed,
-            ls.created_at, ls.updated_at
-     FROM library_sections ls
-     JOIN users u ON u.id = ls.created_by
-     LEFT JOIN library_artifacts la ON la.section_id = ls.id
-     LEFT JOIN library_subscriptions sub ON sub.section_id = ls.id
-     GROUP BY ls.id, u.name
-     ORDER BY ls.created_at DESC`,
-    [userId]
-  );
-  return rows.map(rowToSection);
+export async function listSections(
+  userId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<PaginatedResult<LibrarySectionSummary>> {
+  const limit  = Math.min(options.limit  ?? 50, 200);
+  const offset = options.offset ?? 0;
+
+  const [rows, countRows] = await Promise.all([
+    query<SectionRow>(
+      `SELECT ls.id, ls.name, ls.description, ls.created_by,
+              u.name AS created_by_name,
+              COUNT(DISTINCT la.artifact_id) AS artifact_count,
+              COUNT(DISTINCT sub.user_id)    AS subscriber_count,
+              EXISTS(SELECT 1 FROM library_subscriptions s2
+                     WHERE s2.section_id = ls.id AND s2.user_id = $1) AS is_subscribed,
+              ls.created_at, ls.updated_at
+       FROM library_sections ls
+       JOIN users u ON u.id = ls.created_by
+       LEFT JOIN library_artifacts la ON la.section_id = ls.id
+       LEFT JOIN library_subscriptions sub ON sub.section_id = ls.id
+       GROUP BY ls.id, u.name
+       ORDER BY ls.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    ),
+    query<{ total: string }>(
+      `SELECT COUNT(*) AS total FROM library_sections`,
+      []
+    ),
+  ]);
+
+  const total = parseInt(countRows[0]?.total ?? "0", 10);
+  const items = rows.map(rowToSection);
+  return { items, total, hasMore: offset + items.length < total, limit, offset };
 }
 
 // ── createSection ─────────────────────────────────────────────────────────────

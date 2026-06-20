@@ -1,4 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
+// Paginated list envelope
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  hasMore: boolean;
+  limit: number;
+  offset: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Shared API Response Envelope
 //
 // Every route handler in WorkDesk returns this structure.

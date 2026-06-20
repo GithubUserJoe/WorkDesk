@@ -107,16 +107,16 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user, isLoading: userLoading } = useAuth();
 
-  const { data: sets,      isLoading: setsLoading    } = useSets("root");
-  const { data: artifacts, isLoading: artsLoading    } = useArtifacts({});
-  const { data: starred,   isLoading: starLoading    } = useStarred();
-  const { data: storage,   isLoading: storageLoading } = useStorageUsage();
-  const { data: activity,  isLoading: actLoading     } = useActivityFeed(8);
+  const { data: setsPage,      isLoading: setsLoading    } = useSets("root");
+  const { data: artifactsPage, isLoading: artsLoading    } = useArtifacts({});
+  const { data: starred,       isLoading: starLoading    } = useStarred();
+  const { data: storage,       isLoading: storageLoading } = useStorageUsage();
+  const { data: activity,      isLoading: actLoading     } = useActivityFeed(8);
 
   const firstName = userLoading ? "" : (user?.name?.split(" ")[0] ?? "there");
 
-  const displaySets  = (sets        ?? []).slice(0, 6);
-  const displayArts  = (artifacts   ?? []).slice(0, 5);
+  const displaySets  = (setsPage?.items      ?? []).slice(0, 6);
+  const displayArts  = (artifactsPage?.items ?? []).slice(0, 5);
   const starredArts  = (starred?.artifacts ?? []).slice(0, 3);
   const starredSets  = (starred?.sets      ?? []).slice(0, 3);
   const starredAll   = [
@@ -191,9 +191,9 @@ export default function DashboardPage() {
                     <ArrowRight size={12} className="text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity" />
                   </Link>
                 ))}
-                {(sets ?? []).length > 6 && (
+                {(setsPage?.items ?? []).length > 6 && (
                   <p className="text-[11px] text-text-secondary px-3 pt-1">
-                    +{(sets ?? []).length - 6} more
+                    +{(setsPage?.items ?? []).length - 6} more
                   </p>
                 )}
               </div>
@@ -211,12 +211,12 @@ export default function DashboardPage() {
               <StatRow
                 icon={<FolderOpen size={13} />}
                 label="Sets"
-                value={setsLoading ? "—" : String((sets ?? []).length)}
+                value={setsLoading ? "—" : String(setsPage?.total ?? 0)}
               />
               <StatRow
                 icon={<FileText size={13} />}
                 label="Artifacts"
-                value={artsLoading ? "—" : String((artifacts ?? []).length)}
+                value={artsLoading ? "—" : String(artifactsPage?.total ?? 0)}
               />
               <StatRow
                 icon={<Star size={13} />}
@@ -285,7 +285,7 @@ export default function DashboardPage() {
                     <span className="flex-1 truncate text-[13px] text-text-primary">{a.title}</span>
                     {a.setId && (
                       <span className="hidden sm:block shrink-0 text-[11px] text-text-secondary">
-                        {(sets ?? []).find(s => s.id === a.setId)?.name ?? ""}
+                        {(setsPage?.items ?? []).find(s => s.id === a.setId)?.name ?? ""}
                       </span>
                     )}
                     <span className="shrink-0 text-[11px] text-text-secondary">{fmtDate(a.updatedAt)}</span>

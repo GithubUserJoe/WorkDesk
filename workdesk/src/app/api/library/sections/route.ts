@@ -10,11 +10,17 @@ import {
 // GET  /api/library/sections  — list all sections
 // POST /api/library/sections  — create a new section
 
-export async function GET(_req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await requireRoomSession();
-    const sections = await listSections(session.userId);
-    return NextResponse.json(ok(sections));
+    const { searchParams } = new URL(req.url);
+    const rawLimit  = parseInt(searchParams.get("limit")  ?? "50", 10);
+    const rawOffset = parseInt(searchParams.get("offset") ?? "0",  10);
+    const result = await listSections(session.userId, {
+      limit:  Number.isFinite(rawLimit)  && rawLimit  > 0 ? Math.min(rawLimit,  200) : 50,
+      offset: Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0,
+    });
+    return NextResponse.json(ok(result));
   } catch (err) {
     if (err instanceof NoRoomError)
       return NextResponse.json(fail(err.code, err.message), { status: 403 });

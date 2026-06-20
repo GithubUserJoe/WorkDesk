@@ -25,7 +25,8 @@ interface Props {
 }
 
 export function SetTree({ selectedArtifactId, onSelectArtifact, activeSetId, onSelectSet }: Props) {
-  const { data: rootSets = [], isLoading } = useSets("root");
+  const { data: rootSetsPage, isLoading } = useSets("root");
+  const rootSets = rootSetsPage?.items ?? [];
   const createSet = useCreateSet();
   const [creatingRoot, setCreatingRoot] = useState(false);
   const [rootName, setRootName] = useState("");

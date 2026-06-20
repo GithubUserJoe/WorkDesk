@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type { ConversationSummary, ConversationDetail, MessageItem } from "./types";
+import type { PaginatedResult } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Messaging hooks
@@ -15,11 +16,12 @@ const msgKeys = {
 };
 
 export function useConversations() {
-  return useQuery<ConversationSummary[]>({
+  return useQuery<PaginatedResult<ConversationSummary>>({
     queryKey: msgKeys.conversations(),
-    queryFn: () => api.get<ConversationSummary[]>("/api/messaging/conversations"),
+    queryFn: () => api.get<PaginatedResult<ConversationSummary>>("/api/messaging/conversations"),
     staleTime: 15_000,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -39,6 +41,7 @@ export function useUnreadCount() {
     queryFn: () => api.get<{ count: number }>("/api/messaging/unread"),
     staleTime: 15_000,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false, // don't poll when tab is not visible
   });
 }
 

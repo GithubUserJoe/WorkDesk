@@ -20,7 +20,7 @@ function fmtDate(d: Date | string) {
 export function RecentArtifactsWidget() {
   const router = useRouter();
   const { data, isLoading } = useArtifacts({});
-  const items = (data ?? []).slice(0, 6);
+  const items = (data?.items ?? []).slice(0, 6);
 
   return (
     <Widget title="Recent Artifacts">

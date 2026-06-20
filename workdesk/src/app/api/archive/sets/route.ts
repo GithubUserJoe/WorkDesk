@@ -35,6 +35,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const parentId = searchParams.get("parentId") || "root";
+    const limit  = parseInt(searchParams.get("limit")  ?? "200", 10);
+    const offset = parseInt(searchParams.get("offset") ?? "0",   10);
 
     if (parentId !== "root") {
       const parsed = IdParamSchema.safeParse({ id: parentId });
@@ -43,8 +45,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const sets = await getSets(session.userId, parentId);
-    return NextResponse.json(ok(sets));
+    const result = await getSets(session.userId, parentId, {
+      limit:  Number.isFinite(limit)  && limit  > 0 ? Math.min(limit,  500) : 200,
+      offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
+    });
+    return NextResponse.json(ok(result));
   } catch (err) {
     if (err instanceof Error && err.name === "UnauthenticatedError") {
       return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });

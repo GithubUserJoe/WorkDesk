@@ -12,7 +12,8 @@ export function useGraphData() {
   return useQuery<GraphData>({
     queryKey: graphKeys.graph(),
     queryFn: () => api.get<GraphData>("/api/archive/relationships"),
-    staleTime: 30_000,
+    staleTime: 5 * 60_000, // graph data changes infrequently; avoid re-fetching on every focus
+    refetchOnWindowFocus: false,
   });
 }
 

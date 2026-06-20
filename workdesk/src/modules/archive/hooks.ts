@@ -19,6 +19,7 @@ import type {
   CreateArtifactPayload,
   UpdateArtifactPayload,
 } from "./types";
+import type { PaginatedResult } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Archive data hooks (TanStack Query) over the existing /api/archive routes.
@@ -43,10 +44,11 @@ export const archiveKeys = {
 
 // ── Sets: queries ────────────────────────────────────────────────────────────
 
-export function useSets(parentId: string = "root") {
-  return useQuery<SetSummary[]>({
+export function useSets(parentId: string = "root", limit = 200) {
+  return useQuery<PaginatedResult<SetSummary>>({
     queryKey: archiveKeys.sets(parentId),
-    queryFn: () => api.get<SetSummary[]>("/api/archive/sets", { params: { parentId } }),
+    queryFn: () =>
+      api.get<PaginatedResult<SetSummary>>("/api/archive/sets", { params: { parentId, limit: String(limit) } }),
   });
 }
 
@@ -93,17 +95,20 @@ export function useArtifacts(scope: {
   tags?: string;
   type?: string;
   starred?: boolean;
+  limit?: number;
 }) {
-  return useQuery<ArtifactSummary[]>({
+  const limit = scope.limit ?? 200;
+  return useQuery<PaginatedResult<ArtifactSummary>>({
     queryKey: archiveKeys.artifacts(scope),
     queryFn: () =>
-      api.get<ArtifactSummary[]>("/api/archive/artifacts", {
+      api.get<PaginatedResult<ArtifactSummary>>("/api/archive/artifacts", {
         params: {
-          setId: scope.setId ?? undefined,
-          search: scope.search || undefined,
-          tags: scope.tags || undefined,
-          type: scope.type || undefined,
+          setId:   scope.setId ?? undefined,
+          search:  scope.search  || undefined,
+          tags:    scope.tags    || undefined,
+          type:    scope.type    || undefined,
           starred: scope.starred ? "true" : undefined,
+          limit:   String(limit),
         },
       }),
   });

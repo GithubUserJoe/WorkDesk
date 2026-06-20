@@ -18,7 +18,8 @@ interface Props {
 
 export function MoveModal({ artifactId, currentSetId, artifactTitle, onClose, onMoved }: Props) {
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
-  const { data: rootSets = [] } = useSets("root");
+  const { data: rootSetsPage } = useSets("root");
+  const rootSets = rootSetsPage?.items ?? [];
   const move = useMoveArtifact();
 
   function handleMove() {

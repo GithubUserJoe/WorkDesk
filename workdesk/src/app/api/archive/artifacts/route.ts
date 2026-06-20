@@ -36,10 +36,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const qParsed = ListArtifactsQuerySchemaV2.safeParse({
-      setId: searchParams.get("setId") ?? undefined,
+      setId:  searchParams.get("setId")  ?? undefined,
       search: searchParams.get("search") ?? undefined,
-      tags: searchParams.get("tags") ?? undefined,
-      type: searchParams.get("type") ?? undefined,
+      tags:   searchParams.get("tags")   ?? undefined,
+      type:   searchParams.get("type")   ?? undefined,
       starred: searchParams.get("starred") ?? undefined,
     });
     if (!qParsed.success) {
@@ -48,11 +48,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       });
     }
 
+    const rawLimit  = parseInt(searchParams.get("limit")  ?? "200", 10);
+    const rawOffset = parseInt(searchParams.get("offset") ?? "0",   10);
+    const limit     = Number.isFinite(rawLimit)  && rawLimit  > 0 ? Math.min(rawLimit,  500) : 200;
+    const offset    = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
     const { setId, search, tags: tagsParam, type, starred } = qParsed.data;
     const tags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
 
-    const artifacts = await getArtifacts(session.userId, setId ?? null, { tags, search, type, starred });
-    return NextResponse.json(ok(artifacts));
+    const result = await getArtifacts(session.userId, setId ?? null, { tags, search, type, starred, limit, offset });
+    return NextResponse.json(ok(result));
   } catch (err) {
     if (err instanceof Error && err.name === "UnauthenticatedError") {
       return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });

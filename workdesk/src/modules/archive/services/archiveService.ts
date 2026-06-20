@@ -2,6 +2,7 @@ import { query, queryOne, transaction } from "@/lib/db";
 import { AuditAction, ArtifactType, Visibility } from "@/lib/enums";
 import { incrementStorageUsed } from "./storageService";
 import { emitActivityEvent } from "@/modules/activity/services/activityService";
+import type { PaginatedResult } from "@/types/common";
 import {
   SetSummary,
   SetDetail,
@@ -237,7 +238,8 @@ export async function updateSet(
   payload: UpdateSetPayload
 ): Promise<SetSummary> {
   const existing = await queryOne<SetRow>(
-    `SELECT * FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [setId, ownerId]
   );
   if (!existing) {
@@ -253,24 +255,30 @@ export async function updateSet(
     if (payload.parentId !== null) {
       // Confirm target parent exists.
       const targetParent = await queryOne<SetRow>(
-        `SELECT * FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+        `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+         FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
         [payload.parentId, ownerId]
       );
       if (!targetParent) {
         throw new SetNotFoundError();
       }
 
-      // Walk up the target parent's ancestry; reject if we hit the set being moved.
-      let currentParentId: string | null = targetParent.parent_id;
-      while (currentParentId) {
-        if (currentParentId === setId) {
-          throw new CircularReferenceError();
-        }
-        const nextFolder: { parent_id: string | null } | null = await queryOne(
-          `SELECT parent_id FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-          [currentParentId, ownerId]
-        );
-        currentParentId = nextFolder ? nextFolder.parent_id : null;
+      // Fetch the target parent's full ancestry in one recursive CTE.
+      // If setId appears anywhere in the ancestor chain the move would create a cycle.
+      const ancestorResult = await queryOne<{ ancestor_ids: string[] }>(
+        `WITH RECURSIVE ancestors AS (
+           SELECT id, parent_id FROM sets
+             WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+           UNION ALL
+           SELECT s.id, s.parent_id FROM sets s
+             JOIN ancestors a ON s.id = a.parent_id
+             WHERE s.deleted_at IS NULL
+         )
+         SELECT COALESCE(ARRAY_AGG(id), '{}') AS ancestor_ids FROM ancestors`,
+        [targetParent.id, ownerId]
+      );
+      if (ancestorResult?.ancestor_ids.includes(setId)) {
+        throw new CircularReferenceError();
       }
     }
   }
@@ -311,7 +319,8 @@ export async function updateSet(
  */
 export async function softDeleteSet(ownerId: string, setId: string): Promise<void> {
   const target = await queryOne<SetRow>(
-    `SELECT * FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [setId, ownerId]
   );
   if (!target) {
@@ -362,8 +371,14 @@ export async function softDeleteSet(ownerId: string, setId: string): Promise<voi
   emitActivityEvent({ userId: ownerId, eventType: "SET_DELETED", setId, details: { name: target.name } }).catch(() => {});
 }
 
-export async function getSets(ownerId: string, parentId: string | null | "root"): Promise<SetSummary[]> {
+export async function getSets(
+  ownerId: string,
+  parentId: string | null | "root",
+  options: { limit?: number; offset?: number } = {}
+): Promise<PaginatedResult<SetSummary>> {
   const parentFilter = parentId === "root" ? null : parentId;
+  const limit  = Math.min(options.limit  ?? 200, 500);
+  const offset = options.offset ?? 0;
 
   if (parentFilter !== null) {
     const parent = await queryOne<{ id: string }>(
@@ -375,15 +390,33 @@ export async function getSets(ownerId: string, parentId: string | null | "root")
     }
   }
 
-  const rows = await query<SetRow>(
-    `SELECT * FROM sets
-     WHERE owner_id = $1 AND deleted_at IS NULL
-       AND parent_id IS NOT DISTINCT FROM $2
-     ORDER BY name ASC`,
-    [ownerId, parentFilter]
-  );
+  const [rows, countRows] = await Promise.all([
+    query<SetRow>(
+      `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+       FROM sets
+       WHERE owner_id = $1 AND deleted_at IS NULL
+         AND parent_id IS NOT DISTINCT FROM $2
+       ORDER BY name ASC
+       LIMIT $3 OFFSET $4`,
+      [ownerId, parentFilter, limit, offset]
+    ),
+    query<{ total: string }>(
+      `SELECT COUNT(*) AS total
+       FROM sets
+       WHERE owner_id = $1 AND deleted_at IS NULL
+         AND parent_id IS NOT DISTINCT FROM $2`,
+      [ownerId, parentFilter]
+    ),
+  ]);
 
-  return rows.map(toSetSummary);
+  const total = parseInt(countRows[0]?.total ?? "0", 10);
+  return {
+    items:   rows.map(toSetSummary),
+    total,
+    hasMore: offset + rows.length < total,
+    limit,
+    offset,
+  };
 }
 
 /**
@@ -394,7 +427,8 @@ export async function getSets(ownerId: string, parentId: string | null | "root")
  */
 export async function getSetDetail(ownerId: string, setId: string): Promise<SetDetail> {
   const set = await queryOne<SetRow>(
-    `SELECT * FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [setId, ownerId]
   );
   if (!set) {
@@ -403,13 +437,16 @@ export async function getSetDetail(ownerId: string, setId: string): Promise<SetD
 
   const [children, artifacts] = await Promise.all([
     query<SetRow>(
-      `SELECT * FROM sets
+      `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
+       FROM sets
        WHERE parent_id = $1 AND owner_id = $2 AND deleted_at IS NULL
        ORDER BY name ASC`,
       [setId, ownerId]
     ),
     query<ArtifactRow>(
-      `SELECT * FROM artifacts
+      `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
+              created_at, updated_at, deleted_at
+       FROM artifacts
        WHERE set_id = $1 AND owner_id = $2 AND deleted_at IS NULL
        ORDER BY updated_at DESC`,
       [setId, ownerId]
@@ -511,7 +548,9 @@ export async function updateArtifact(
   payload: UpdateArtifactPayload
 ): Promise<ArtifactSummary> {
   const existing = await queryOne<ArtifactRow>(
-    `SELECT * FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
+            created_at, updated_at, deleted_at
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [artifactId, ownerId]
   );
   if (!existing) {
@@ -579,7 +618,9 @@ export async function updateArtifact(
 
 export async function softDeleteArtifact(ownerId: string, artifactId: string): Promise<void> {
   const target = await queryOne<ArtifactRow>(
-    `SELECT * FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
+            created_at, updated_at, deleted_at
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [artifactId, ownerId]
   );
   if (!target) {
@@ -610,9 +651,13 @@ export async function getArtifacts(
     search?: string;
     type?: string;
     starred?: boolean;
+    limit?: number;
+    offset?: number;
   } = {}
-): Promise<ArtifactSummary[]> {
+): Promise<PaginatedResult<ArtifactSummary>> {
   const { tags, search, type, starred } = options;
+  const limit  = Math.min(options.limit  ?? 200, 500);
+  const offset = options.offset ?? 0;
   const setFilter = setId === "root" ? null : setId;
 
   const conditions: string[] = ["a.owner_id = $1", "a.deleted_at IS NULL"];
@@ -653,16 +698,36 @@ export async function getArtifacts(
     : "";
   if (starred) params.push(ownerId);
 
-  const rows = await query<ArtifactRow>(
-    `SELECT a.*
-     FROM artifacts a
-     ${starJoin}
-     WHERE ${conditions.join(" AND ")}
-     ORDER BY a.updated_at DESC`,
-    params
-  );
+  const whereClause = conditions.join(" AND ");
 
-  return rows.map(toArtifactSummary);
+  const [rows, countRows] = await Promise.all([
+    query<ArtifactRow>(
+      `SELECT a.id, a.title, a.description, a.tags, a.type, a.visibility,
+              a.owner_id, a.set_id, a.created_at, a.updated_at, a.deleted_at
+       FROM artifacts a
+       ${starJoin}
+       WHERE ${whereClause}
+       ORDER BY a.updated_at DESC
+       LIMIT $${i} OFFSET $${i + 1}`,
+      [...params, limit, offset]
+    ),
+    query<{ total: string }>(
+      `SELECT COUNT(*) AS total
+       FROM artifacts a
+       ${starJoin}
+       WHERE ${whereClause}`,
+      params
+    ),
+  ]);
+
+  const total = parseInt(countRows[0]?.total ?? "0", 10);
+  return {
+    items:   rows.map(toArtifactSummary),
+    total,
+    hasMore: offset + rows.length < total,
+    limit,
+    offset,
+  };
 }
 
 export async function getArtifactDetails(
@@ -672,7 +737,9 @@ export async function getArtifactDetails(
   allowShared = false
 ): Promise<ArtifactDetail> {
   let artifact = await queryOne<ArtifactRow>(
-    `SELECT * FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+    `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
+            created_at, updated_at, deleted_at
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
     [artifactId, userId]
   );
 
@@ -680,7 +747,9 @@ export async function getArtifactDetails(
   if (!artifact && allowShared) {
     // SHARED: grantee has an explicit share row.
     artifact = await queryOne<ArtifactRow>(
-      `SELECT a.* FROM artifacts a
+      `SELECT a.id, a.title, a.description, a.tags, a.type, a.visibility,
+              a.owner_id, a.set_id, a.created_at, a.updated_at, a.deleted_at
+       FROM artifacts a
        JOIN artifact_shares s ON s.artifact_id = a.id AND s.grantee_id = $2
        WHERE a.id = $1
          AND a.deleted_at IS NULL
@@ -690,7 +759,9 @@ export async function getArtifactDetails(
     // PUBLIC: any authenticated user can read library-published artifacts.
     if (!artifact) {
       artifact = await queryOne<ArtifactRow>(
-        `SELECT * FROM artifacts WHERE id = $1 AND deleted_at IS NULL AND visibility = 'PUBLIC'`,
+        `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
+                created_at, updated_at, deleted_at
+         FROM artifacts WHERE id = $1 AND deleted_at IS NULL AND visibility = 'PUBLIC'`,
         [artifactId]
       );
     }
@@ -701,7 +772,8 @@ export async function getArtifactDetails(
   }
 
   const versions = await query<VersionRow>(
-    `SELECT * FROM versions WHERE artifact_id = $1 ORDER BY version_number DESC`,
+    `SELECT id, artifact_id, version_number, content_key, byte_size, change_summary, author_id, created_at
+     FROM versions WHERE artifact_id = $1 ORDER BY version_number DESC`,
     [artifactId]
   );
 

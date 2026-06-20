@@ -156,8 +156,8 @@ export function Explorer({ initialStarred = false }: { initialStarred?: boolean 
 
   const loading = setsQuery.isLoading || artifactsQuery.isLoading;
   const error = setsQuery.error || artifactsQuery.error;
-  const sets = hasFilters ? [] : (setsQuery.data ?? []); // hide Sets while searching
-  const artifacts = artifactsQuery.data ?? [];
+  const sets = hasFilters ? [] : (setsQuery.data?.items ?? []); // hide Sets while searching
+  const artifacts = artifactsQuery.data?.items ?? [];
   const isEmpty = !loading && !error && sets.length === 0 && artifacts.length === 0;
 
   return (

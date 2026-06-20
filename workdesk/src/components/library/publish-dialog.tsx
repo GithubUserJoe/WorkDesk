@@ -28,7 +28,8 @@ export function PublishDialog({
   artifactId: string;
   artifactTitle: string;
 }) {
-  const { data: allSections = [], isLoading: sectionsLoading } = useLibrarySections();
+  const { data: allSectionsPage, isLoading: sectionsLoading } = useLibrarySections();
+  const allSections = allSectionsPage?.items ?? [];
   const { data: myMemberships = [], isLoading: membershipsLoading } = useArtifactSections(
     artifactId,
     open

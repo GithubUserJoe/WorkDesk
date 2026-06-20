@@ -360,7 +360,8 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
 
 export default function LibraryPage() {
   const { user } = useAuth();
-  const { data: sections = [], isLoading, error } = useLibrarySections();
+  const { data: sectionsPage, isLoading, error } = useLibrarySections();
+  const sections = sectionsPage?.items ?? [];
   const deleteSection = useDeleteSection();
   const pinSection    = useSubscribeSection();
   const unpinSection  = useUnsubscribeSection();

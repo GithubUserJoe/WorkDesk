@@ -16,11 +16,17 @@ import {
 //   Creates the conversation if it doesn't exist, then sends the first message.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function GET(_req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await requireRoomSession();
-    const conversations = await listConversations(session.userId);
-    return NextResponse.json(ok(conversations));
+    const { searchParams } = new URL(req.url);
+    const rawLimit  = parseInt(searchParams.get("limit")  ?? "50", 10);
+    const rawOffset = parseInt(searchParams.get("offset") ?? "0",  10);
+    const result = await listConversations(session.userId, {
+      limit:  Number.isFinite(rawLimit)  && rawLimit  > 0 ? Math.min(rawLimit,  200) : 50,
+      offset: Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0,
+    });
+    return NextResponse.json(ok(result));
   } catch (err) {
     if (err instanceof NoRoomError)
       return NextResponse.json(fail(err.code, err.message), { status: 403 });
