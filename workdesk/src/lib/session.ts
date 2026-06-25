@@ -21,6 +21,7 @@ export interface SessionData {
   role: Role;
   isLoggedIn: boolean;
   hasRoom: boolean;
+  activeRoomId: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ export async function requireSession(): Promise<SessionData> {
     role: session.role,
     isLoggedIn: session.isLoggedIn,
     hasRoom: session.hasRoom ?? false,
+    activeRoomId: session.activeRoomId ?? null,
   };
 }
 
@@ -84,6 +86,22 @@ export async function requireRoomSession(): Promise<SessionData> {
     throw new NoRoomError();
   }
   return sessionData;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// requireActiveRoomSession
+//
+// Extends requireRoomSession with an active room assertion.
+// All data-access routes call this to get the team tenant boundary.
+// Returns sessionData typed to guarantee activeRoomId is non-null.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function requireActiveRoomSession(): Promise<SessionData & { activeRoomId: string }> {
+  const sessionData = await requireRoomSession();
+  if (!sessionData.activeRoomId) {
+    throw new NoActiveRoomError();
+  }
+  return sessionData as SessionData & { activeRoomId: string };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,5 +141,13 @@ export class NoRoomError extends Error {
   constructor() {
     super("You must belong to a Team Room to access this resource.");
     this.name = "NoRoomError";
+  }
+}
+
+export class NoActiveRoomError extends Error {
+  readonly code = "NO_ACTIVE_ROOM";
+  constructor() {
+    super("No active team selected. Please switch to a team.");
+    this.name = "NoActiveRoomError";
   }
 }

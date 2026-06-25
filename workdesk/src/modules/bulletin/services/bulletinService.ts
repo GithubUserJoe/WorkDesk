@@ -109,16 +109,16 @@ async function markOverdueAssignments(): Promise<void> {
 
 export async function listBulletins(
   userId: string,
+  roomId: string,
   opts: { limit?: number; cursor?: string } = {}
 ): Promise<BulletinSummary[]> {
-  // Best-effort overdue sweep on every list call (lightweight UPDATE).
   markOverdueAssignments().catch(() => {});
 
   const limit = opts.limit ?? 20;
   const cursorClause = opts.cursor
-    ? `AND (b.pinned = false AND b.created_at < $3 OR b.pinned = true AND b.created_at < $3)`
+    ? `AND (b.pinned = false AND b.created_at < $4 OR b.pinned = true AND b.created_at < $4)`
     : "";
-  const params: (string | number)[] = [userId, limit];
+  const params: (string | number)[] = [userId, roomId, limit];
   if (opts.cursor) params.push(opts.cursor);
 
   const rows = await query<BulletinRow>(
@@ -133,10 +133,11 @@ export async function listBulletins(
      FROM bulletins b
      JOIN users u ON u.id = b.author_id
      LEFT JOIN countdown_assignments ca ON ca.bulletin_id = b.id
+     WHERE b.room_id = $2
      ${cursorClause}
      GROUP BY b.id, u.name
      ORDER BY b.pinned DESC, b.created_at DESC
-     LIMIT $2`,
+     LIMIT $3`,
     params
   );
 
@@ -190,6 +191,7 @@ export async function getBulletin(userId: string, bulletinId: string): Promise<B
 
 export async function createBulletin(
   authorId: string,
+  roomId: string,
   input: CreateBulletinInput
 ): Promise<BulletinSummary> {
   return transaction(async (tx) => {
@@ -198,11 +200,12 @@ export async function createBulletin(
       created_at: Date;
       updated_at: Date;
     }>(
-      `INSERT INTO bulletins (author_id, type, title, body, due_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO bulletins (author_id, room_id, type, title, body, due_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, created_at, updated_at`,
       [
         authorId,
+        roomId,
         input.type,
         input.title,
         input.type === "COUNTDOWN" ? (input.body ?? null) : ((input as { body?: string | null }).body ?? null),
@@ -262,11 +265,12 @@ export async function createBulletin(
       }
     }
 
-    // Notify all other active members of the new bulletin (best-effort, outside tx).
+    // Notify all other room members of the new bulletin (best-effort, outside tx).
     const authorName = authorRows[0]?.name ?? "Someone";
     query<{ id: string }>(
-      `SELECT id FROM users WHERE id <> $1 AND status = 'ACTIVE'`,
-      [authorId]
+      `SELECT u.id FROM room_memberships rm JOIN users u ON u.id = rm.user_id
+       WHERE rm.room_id = $2 AND rm.user_id <> $1 AND u.status = 'ACTIVE'`,
+      [authorId, roomId]
     ).then(members => {
       for (const m of members) {
         emitNotification(

@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireRoomSession, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { updateArtifact, ArtifactNotFoundError, SetNotFoundError } from "@/modules/archive/services/archiveService";
 import { IdParamSchema } from "@/modules/archive/schemas";
 import { ok, fail } from "@/types/common";
@@ -16,7 +16,7 @@ interface RouteParams {
 // POST /api/archive/artifacts/[id]/move — move artifact to a different set
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
 
     const idParsed = IdParamSchema.safeParse({ id });
@@ -30,16 +30,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.format()), { status: 400 });
     }
 
-    const artifact = await updateArtifact(session.userId, idParsed.data.id, { setId: parsed.data.setId });
+    const artifact = await updateArtifact(session.userId, session.activeRoomId, idParsed.data.id, { setId: parsed.data.setId });
     return NextResponse.json(ok(artifact));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    if (err instanceof ArtifactNotFoundError || err instanceof SetNotFoundError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    }
-    console.error("[POST /api/archive/artifacts/[id]/move] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof ArtifactNotFoundError || err instanceof SetNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    console.error("[POST /api/archive/artifacts/[id]/move]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }

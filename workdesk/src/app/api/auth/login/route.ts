@@ -4,7 +4,7 @@ import { getIronSession } from "iron-session";
 import { LoginSchema } from "@/modules/auth/schemas";
 import { verifyCredentials, InvalidCredentialsError, UserSuspendedError } from "@/modules/auth/services/authService";
 import { SESSION_OPTIONS, type SessionData } from "@/lib/session";
-import { hasAnyRoom } from "@/modules/teams/services/teamService";
+import { hasAnyRoom, getFirstRoomId } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
 import { SafeUser } from "@/modules/auth/types";
 
@@ -40,7 +40,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Check room membership so the proxy gate works immediately after login
     // without a separate DB call per request.
-    const hasRoom = await hasAnyRoom(user.id);
+    const [hasRoom, firstRoomId] = await Promise.all([
+      hasAnyRoom(user.id),
+      getFirstRoomId(user.id),
+    ]);
 
     // Build session options. If "Remember me" is off, strip maxAge so the cookie
     // becomes a session cookie (expires when the browser closes).
@@ -59,6 +62,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     session.role = user.role;
     session.isLoggedIn = true;
     session.hasRoom = hasRoom;
+    session.activeRoomId = firstRoomId;
     await session.save();
 
     return NextResponse.json(ok(user), { status: 200 });

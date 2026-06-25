@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { ListMessagesQuerySchema } from "@/modules/messaging/schemas";
 import {
@@ -19,7 +19,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: conversationId } = await params;
     const { searchParams } = req.nextUrl;
     const parsed = ListMessagesQuerySchema.safeParse({
@@ -35,10 +35,8 @@ export async function GET(
     });
     return NextResponse.json(ok(detail));
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof ConversationNotFoundError || err instanceof NotConversationMemberError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[GET /api/messaging/conversations/[id]]", err);

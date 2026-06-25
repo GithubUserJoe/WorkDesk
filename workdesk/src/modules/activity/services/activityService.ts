@@ -29,7 +29,7 @@ export async function recordOpen(userId: string, artifactId: string): Promise<vo
  * getRecentlyOpened — most recently opened artifacts for a user (up to `limit`).
  * Joins artifact table to include title/type; skips soft-deleted artifacts.
  */
-export async function getRecentlyOpened(userId: string, limit = 10): Promise<RecentlyOpenedItem[]> {
+export async function getRecentlyOpened(userId: string, roomId: string, limit = 10): Promise<RecentlyOpenedItem[]> {
   const rows = await query<{
     artifact_id: string;
     title: string;
@@ -41,10 +41,11 @@ export async function getRecentlyOpened(userId: string, limit = 10): Promise<Rec
      FROM artifact_accesses aa
      JOIN artifacts a ON a.id = aa.artifact_id
      WHERE aa.user_id = $1
+       AND a.room_id = $2
        AND a.deleted_at IS NULL
      ORDER BY aa.opened_at DESC
-     LIMIT $2`,
-    [userId, limit]
+     LIMIT $3`,
+    [userId, roomId, limit]
   );
 
   return rows.map((r) => ({
@@ -75,9 +76,9 @@ export async function emitActivityEvent(payload: EmitActivityPayload): Promise<v
 }
 
 /**
- * getActivityFeed — recent activity events for a user, with denormalized title.
+ * getActivityFeed — recent activity events for a user in the active room.
  */
-export async function getActivityFeed(userId: string, limit = 20): Promise<ActivityEvent[]> {
+export async function getActivityFeed(userId: string, roomId: string, limit = 20): Promise<ActivityEvent[]> {
   const rows = await query<{
     id: string;
     user_id: string;
@@ -95,9 +96,10 @@ export async function getActivityFeed(userId: string, limit = 20): Promise<Activ
      LEFT JOIN artifacts a ON a.id = ae.artifact_id
      LEFT JOIN sets      s ON s.id = ae.set_id
      WHERE ae.user_id = $1
+       AND ae.room_id = $2
      ORDER BY ae.created_at DESC
-     LIMIT $2`,
-    [userId, limit]
+     LIMIT $3`,
+    [userId, roomId, limit]
   );
 
   return rows.map((r) => ({

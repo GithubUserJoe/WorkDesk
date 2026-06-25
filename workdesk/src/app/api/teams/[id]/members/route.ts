@@ -9,7 +9,7 @@ import {
   RoomNotFoundError,
 } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
-import { stampHasRoom } from "@/app/api/teams/route";
+import { stampSession } from "@/app/api/teams/route";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/teams/[id]/members
@@ -53,7 +53,8 @@ export async function DELETE(
     await leaveRoom(session.userId, id);
 
     // Re-check membership — if this was the user's only room, close the gate.
-    await stampHasRoom(session.userId);
+    // activeRoomId is reset to next available room (or null if none).
+    await stampSession(session.userId);
 
     return NextResponse.json(ok(null));
   } catch (err) {

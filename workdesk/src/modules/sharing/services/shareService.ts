@@ -56,6 +56,14 @@ export class ShareNotFoundError extends Error {
   }
 }
 
+export class GranteeNotInRoomError extends Error {
+  readonly code = "GRANTEE_NOT_IN_ROOM";
+  constructor() {
+    super("You can only share with members of your active team.");
+    this.name = "GranteeNotInRoomError";
+  }
+}
+
 // ── Raw row shapes ────────────────────────────────────────────────────────────
 
 interface ShareRow {
@@ -94,24 +102,30 @@ async function writeAuditLog(
  */
 export async function shareArtifact(
   ownerId: string,
+  roomId: string,
   artifactId: string,
   granteeEmail: string
 ): Promise<ShareGrant> {
-  // Verify ownership (owner must own the artifact and it must be live).
   const artifact = await queryOne<{ id: string; visibility: string; title: string }>(
     `SELECT id, visibility, title FROM artifacts
-     WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, ownerId]
+     WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, ownerId, roomId]
   );
   if (!artifact) throw new ArtifactNotFoundOrPrivateError();
 
-  // Resolve grantee.
   const grantee = await queryOne<{ id: string; name: string; email: string }>(
     `SELECT id, name, email FROM users WHERE email = $1 AND status = 'ACTIVE'`,
     [granteeEmail]
   );
   if (!grantee) throw new GranteeNotFoundError();
   if (grantee.id === ownerId) throw new CannotShareWithSelfError();
+
+  // Enforce same-room membership
+  const inRoom = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM room_memberships WHERE room_id = $1 AND user_id = $2) AS exists`,
+    [roomId, grantee.id]
+  );
+  if (!inRoom?.exists) throw new GranteeNotInRoomError();
 
   // Check for existing grant.
   const existing = await queryOne<{ id: string }>(
@@ -260,23 +274,28 @@ export async function listShareGrants(
  */
 export async function shareSet(
   ownerId: string,
+  roomId: string,
   setId: string,
   granteeEmail: string
 ): Promise<{ sharedCount: number }> {
-  // Verify the set exists and is owned by the caller.
   const set = await queryOne<{ id: string; name: string }>(
-    `SELECT id, name FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [setId, ownerId]
+    `SELECT id, name FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [setId, ownerId, roomId]
   );
   if (!set) throw new ArtifactNotFoundOrPrivateError();
 
-  // Resolve grantee.
   const grantee = await queryOne<{ id: string; name: string; email: string }>(
     `SELECT id, name, email FROM users WHERE email = $1 AND status = 'ACTIVE'`,
     [granteeEmail]
   );
   if (!grantee) throw new GranteeNotFoundError();
   if (grantee.id === ownerId) throw new CannotShareWithSelfError();
+
+  const inRoom = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM room_memberships WHERE room_id = $1 AND user_id = $2) AS exists`,
+    [roomId, grantee.id]
+  );
+  if (!inRoom?.exists) throw new GranteeNotInRoomError();
 
   // Collect all artifacts in the set and its descendants owned by the caller.
   const artifactRows = await query<{ id: string; title: string; visibility: string }>(
@@ -336,8 +355,8 @@ export async function shareSet(
 
 // ── listMyShares ──────────────────────────────────────────────────────────────
 
-/** All artifacts the current user has shared with others (outgoing shares). */
-export async function listMyShares(ownerId: string): Promise<OutgoingShare[]> {
+/** All artifacts the current user has shared with others (outgoing shares), scoped to room. */
+export async function listMyShares(ownerId: string, roomId: string): Promise<OutgoingShare[]> {
   const rows = await query<{
     share_id: string;
     artifact_id: string;
@@ -355,9 +374,9 @@ export async function listMyShares(ownerId: string): Promise<OutgoingShare[]> {
      FROM artifact_shares s
      JOIN artifacts a ON a.id = s.artifact_id
      JOIN users g     ON g.id = s.grantee_id
-     WHERE s.owner_id = $1 AND a.deleted_at IS NULL
+     WHERE s.owner_id = $1 AND a.room_id = $2 AND a.deleted_at IS NULL
      ORDER BY s.created_at DESC`,
-    [ownerId]
+    [ownerId, roomId]
   );
 
   return rows.map((r) => ({
@@ -374,8 +393,8 @@ export async function listMyShares(ownerId: string): Promise<OutgoingShare[]> {
 
 // ── listSharedWithMe ──────────────────────────────────────────────────────────
 
-/** Artifacts shared with `userId` by others. */
-export async function listSharedWithMe(userId: string): Promise<SharedArtifactSummary[]> {
+/** Artifacts shared with `userId` by others, scoped to room. */
+export async function listSharedWithMe(userId: string, roomId: string): Promise<SharedArtifactSummary[]> {
   const rows = await query<{
     id: string;
     title: string;
@@ -396,10 +415,11 @@ export async function listSharedWithMe(userId: string): Promise<SharedArtifactSu
      JOIN artifacts a ON a.id = s.artifact_id
      JOIN users u     ON u.id = a.owner_id
      WHERE s.grantee_id = $1
+       AND a.room_id = $2
        AND a.deleted_at IS NULL
        AND a.visibility IN ('SHARED', 'PUBLIC')
      ORDER BY s.created_at DESC`,
-    [userId]
+    [userId, roomId]
   );
 
   return rows.map((r) => ({

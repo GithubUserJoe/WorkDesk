@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireRoomSession, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, NoRoomError, NoActiveRoomError, UnauthenticatedError } from "@/lib/session";
 import {
   commitVersion,
   restoreVersion,
@@ -21,10 +21,9 @@ interface RouteParams {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
 
-    // Validate path param ID
     const idParsed = IdParamSchema.safeParse({ id });
     if (!idParsed.success) {
       return NextResponse.json(fail("BAD_REQUEST", "Invalid artifact ID format."), { status: 400 });
@@ -33,24 +32,17 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     const body = await req.json();
     const parsed = CommitVersionSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input data.", parsed.error.format()), {
-        status: 400,
-      });
+      return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input data.", parsed.error.format()), { status: 400 });
     }
 
-    const version = await commitVersion(session.userId, idParsed.data.id, parsed.data);
+    const version = await commitVersion(session.userId, session.activeRoomId, idParsed.data.id, parsed.data);
     return NextResponse.json(ok(version), { status: 201 });
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    if (err instanceof ArtifactNotFoundError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    }
-    if (err instanceof InvalidContentKeyError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    }
-    console.error("[POST versions] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof ArtifactNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    if (err instanceof InvalidContentKeyError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    console.error("[POST versions]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }
@@ -62,10 +54,9 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 // ─────────────────────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
 
-    // Validate path param ID
     const idParsed = IdParamSchema.safeParse({ id });
     if (!idParsed.success) {
       return NextResponse.json(fail("BAD_REQUEST", "Invalid artifact ID format."), { status: 400 });
@@ -74,21 +65,16 @@ export async function PUT(req: NextRequest, { params }: RouteParams): Promise<Ne
     const body = await req.json();
     const parsed = RestoreVersionSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input data.", parsed.error.format()), {
-        status: 400,
-      });
+      return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input data.", parsed.error.format()), { status: 400 });
     }
 
-    const version = await restoreVersion(session.userId, idParsed.data.id, parsed.data.versionNumber);
+    const version = await restoreVersion(session.userId, session.activeRoomId, idParsed.data.id, parsed.data.versionNumber);
     return NextResponse.json(ok(version));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    if (err instanceof ArtifactNotFoundError || err instanceof VersionNotFoundError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    }
-    console.error("[PUT versions] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof ArtifactNotFoundError || err instanceof VersionNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    console.error("[PUT versions]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }

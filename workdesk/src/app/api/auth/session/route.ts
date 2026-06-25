@@ -3,6 +3,11 @@ import { getSession } from "@/lib/session";
 import { getUserById, UserNotFoundError } from "@/modules/auth/services/authService";
 import { ok, fail } from "@/types/common";
 
+export interface SessionResponse {
+  user: Awaited<ReturnType<typeof getUserById>>;
+  activeRoomId: string | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/auth/session
 //
@@ -37,7 +42,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    return NextResponse.json(ok(user), { status: 200 });
+    return NextResponse.json(ok<SessionResponse>({ user, activeRoomId: session.activeRoomId ?? null }), { status: 200 });
   } catch (err) {
     if (err instanceof UserNotFoundError) {
       // User was deleted after session was issued — clean up.

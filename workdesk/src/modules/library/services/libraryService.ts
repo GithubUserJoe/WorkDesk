@@ -119,6 +119,7 @@ function rowToArtifact(r: ArtifactRow): LibraryArtifactItem {
 
 export async function listSections(
   userId: string,
+  roomId: string,
   options: { limit?: number; offset?: number } = {}
 ): Promise<PaginatedResult<LibrarySectionSummary>> {
   const limit  = Math.min(options.limit  ?? 50, 200);
@@ -137,14 +138,15 @@ export async function listSections(
        JOIN users u ON u.id = ls.created_by
        LEFT JOIN library_artifacts la ON la.section_id = ls.id
        LEFT JOIN library_subscriptions sub ON sub.section_id = ls.id
+       WHERE ls.room_id = $4
        GROUP BY ls.id, u.name
        ORDER BY ls.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+      [userId, limit, offset, roomId]
     ),
     query<{ total: string }>(
-      `SELECT COUNT(*) AS total FROM library_sections`,
-      []
+      `SELECT COUNT(*) AS total FROM library_sections WHERE room_id = $1`,
+      [roomId]
     ),
   ]);
 
@@ -157,13 +159,14 @@ export async function listSections(
 
 export async function createSection(
   userId: string,
+  roomId: string,
   name: string,
   description: string | null
 ): Promise<LibrarySectionSummary> {
   const rows = await query<SectionRow>(
     `WITH ins AS (
-       INSERT INTO library_sections (name, description, created_by)
-       VALUES ($1, $2, $3)
+       INSERT INTO library_sections (name, description, created_by, room_id)
+       VALUES ($1, $2, $3, $4)
        RETURNING *
      )
      SELECT ins.id, ins.name, ins.description, ins.created_by,
@@ -173,7 +176,7 @@ export async function createSection(
             false AS is_subscribed,
             ins.created_at, ins.updated_at
      FROM ins JOIN users u ON u.id = ins.created_by`,
-    [name, description, userId]
+    [name, description, userId, roomId]
   );
   writeAuditLog("LIBRARY_SECTION_CREATED" as string, userId, rows[0].id, { name }).catch(() => {});
   return rowToSection(rows[0]);
@@ -381,6 +384,7 @@ export async function getArtifactSections(artifactId: string): Promise<{ id: str
 
 export async function publishSetToLibrary(
   ownerId: string,
+  roomId: string,
   setId: string
 ): Promise<{ sectionId: string; publishedCount: number }> {
   // Verify the set exists and is owned by the caller.
@@ -406,9 +410,9 @@ export async function publishSetToLibrary(
   // Create the section named after the set, then publish each artifact.
   const sectionId = await transaction(async (tx) => {
     const { rows: secRows } = await tx.query<{ id: string }>(
-      `INSERT INTO library_sections (name, description, created_by)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [set.name, `Published from folder "${set.name}"`, ownerId]
+      `INSERT INTO library_sections (name, description, created_by, room_id)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [set.name, `Published from folder "${set.name}"`, ownerId, roomId]
     );
     const sid = secRows[0].id;
 

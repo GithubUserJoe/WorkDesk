@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { query } from "@/lib/db";
 import { ok, fail } from "@/types/common";
 import { CreateRelationshipSchema, DeleteRelationshipSchema } from "@/modules/relationships/schemas";
@@ -22,8 +22,9 @@ import {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const userId = session.userId;
+    const roomId = session.activeRoomId;
 
     const nodes = await query<{
       id: string;
@@ -46,6 +47,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       JOIN users u ON u.id = a.owner_id
       LEFT JOIN sets s ON s.id = a.set_id AND s.deleted_at IS NULL
       WHERE a.deleted_at IS NULL
+        AND a.room_id = $2
         AND (
           a.owner_id = $1
           OR a.visibility = 'PUBLIC'
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           )
         )
       ORDER BY a.created_at DESC
-    `, [userId]);
+    `, [userId, roomId]);
 
     const visibleIds = nodes.map((n) => n.id);
     let edges: { id: string; from_id: string; to_id: string; type: string; created_by: string }[] = [];
@@ -70,19 +72,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(ok({ nodes, edges }));
   } catch (err: unknown) {
-    const e = err as { code?: string; message?: string };
-    if (e.code === "UNAUTHENTICATED" || (err as { name?: string }).name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     console.error("[GET /api/archive/relationships]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Failed to load graph data."), { status: 500 });
   }
 }
 
-// POST /api/archive/relationships — create a relationship between two artifacts
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const body = await req.json().catch(() => ({}));
     const parsed = CreateRelationshipSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.flatten()), { status: 400 });
@@ -91,20 +90,19 @@ export async function POST(req: NextRequest) {
     const rel = await createRelationship(session.userId, fromId, toId, type);
     return NextResponse.json(ok(rel), { status: 201 });
   } catch (err) {
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError || err instanceof ForbiddenError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof SelfRelationshipError) return NextResponse.json(fail(err.code, err.message), { status: 400 });
     if (err instanceof ArtifactNotAccessibleError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
     if (err instanceof DuplicateRelationshipError) return NextResponse.json(fail(err.code, err.message), { status: 409 });
-    if (err instanceof ForbiddenError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if ((err as { name?: string }).name === "UnauthenticatedError") return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
     console.error("[POST /api/archive/relationships]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Something went wrong."), { status: 500 });
   }
 }
 
-// DELETE /api/archive/relationships — delete a relationship
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const body = await req.json().catch(() => ({}));
     const parsed = DeleteRelationshipSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.flatten()), { status: 400 });
@@ -112,9 +110,9 @@ export async function DELETE(req: NextRequest) {
     await deleteRelationship(session.userId, session.role, parsed.data.relationshipId);
     return NextResponse.json(ok(null));
   } catch (err) {
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError || err instanceof ForbiddenError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof RelationshipNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    if (err instanceof ForbiddenError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if ((err as { name?: string }).name === "UnauthenticatedError") return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
     console.error("[DELETE /api/archive/relationships]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Something went wrong."), { status: 500 });
   }

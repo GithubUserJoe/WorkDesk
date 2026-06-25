@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import {
   subscribeSection,
@@ -15,7 +15,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: sectionId } = await params;
     await subscribeSection(session.userId, sectionId);
     return NextResponse.json(ok({ subscribed: true }));
@@ -36,7 +36,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: sectionId } = await params;
     await unsubscribeSection(session.userId, sectionId);
     return NextResponse.json(ok({ unsubscribed: true }));

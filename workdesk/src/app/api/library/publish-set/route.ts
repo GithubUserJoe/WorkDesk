@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
 import {
@@ -14,19 +14,17 @@ const Schema = z.object({ setId: z.string().uuid() });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const body: unknown = await req.json();
     const parsed = Schema.safeParse(body);
     if (!parsed.success)
       return NextResponse.json(fail("VALIDATION_ERROR", "Invalid input.", parsed.error.flatten()), { status: 400 });
 
-    const result = await publishSetToLibrary(session.userId, parsed.data.setId);
+    const result = await publishSetToLibrary(session.userId, session.activeRoomId, parsed.data.setId);
     return NextResponse.json(ok(result), { status: 201 });
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof ArtifactNotFoundError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[POST /api/library/publish-set]", err);

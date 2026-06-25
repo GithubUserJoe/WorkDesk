@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import {
   markComplete,
@@ -13,15 +13,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
     await markComplete(session.userId, id);
     return NextResponse.json(ok({ completed: true }));
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof BulletinNotFoundError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[POST /api/bulletin/[id]/complete]", err);

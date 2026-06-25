@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { SESSION_OPTIONS, type SessionData, UnauthenticatedError } from "@/lib/session";
-import { hasAnyRoom } from "@/modules/teams/services/teamService";
+import { hasAnyRoom, getFirstRoomId } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,11 +26,18 @@ export async function POST(): Promise<NextResponse> {
       throw new UnauthenticatedError();
     }
 
-    const hasRoom = await hasAnyRoom(session.userId);
+    const [hasRoom, firstRoomId] = await Promise.all([
+      hasAnyRoom(session.userId),
+      getFirstRoomId(session.userId),
+    ]);
     session.hasRoom = hasRoom;
+    // Only update activeRoomId if it isn't already set to a valid room.
+    if (!session.activeRoomId) {
+      session.activeRoomId = firstRoomId;
+    }
     await session.save();
 
-    return NextResponse.json(ok({ hasRoom }));
+    return NextResponse.json(ok({ hasRoom, activeRoomId: session.activeRoomId ?? null }));
   } catch (err) {
     if (err instanceof UnauthenticatedError)
       return NextResponse.json(fail(err.code, err.message), { status: 401 });

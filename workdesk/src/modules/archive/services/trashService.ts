@@ -60,22 +60,22 @@ interface TrashedSetRow {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** List all soft-deleted artifacts and sets owned by this user. */
-export async function listTrash(ownerId: string): Promise<TrashItem[]> {
+/** List all soft-deleted artifacts and sets owned by this user in the active room. */
+export async function listTrash(ownerId: string, roomId: string): Promise<TrashItem[]> {
   const [artifacts, sets] = await Promise.all([
     query<TrashedArtifactRow>(
       `SELECT id, title, type, deleted_at
        FROM artifacts
-       WHERE owner_id = $1 AND deleted_at IS NOT NULL
+       WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NOT NULL
        ORDER BY deleted_at DESC`,
-      [ownerId]
+      [ownerId, roomId]
     ),
     query<TrashedSetRow>(
       `SELECT id, name, deleted_at
        FROM sets
-       WHERE owner_id = $1 AND deleted_at IS NOT NULL
+       WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NOT NULL
        ORDER BY deleted_at DESC`,
-      [ownerId]
+      [ownerId, roomId]
     ),
   ]);
 

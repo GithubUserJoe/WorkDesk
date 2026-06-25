@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireAdminSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, requireAdminSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
 import {
@@ -25,15 +25,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
     const bulletin = await getBulletin(session.userId, id);
     return NextResponse.json(ok(bulletin));
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof BulletinNotFoundError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[GET /api/bulletin/[id]]", err);
@@ -46,15 +44,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id } = await params;
     await deleteBulletin(session.userId, session.role, id);
     return NextResponse.json(ok({ deleted: true }));
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof BulletinNotFoundError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     if (err instanceof ForbiddenError)
@@ -79,10 +75,8 @@ export async function PUT(
     await pinBulletin(session.userId, id, parsed.data.pinned);
     return NextResponse.json(ok({ pinned: parsed.data.pinned }));
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     if (err instanceof BulletinNotFoundError)
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[PUT /api/bulletin/[id]]", err);

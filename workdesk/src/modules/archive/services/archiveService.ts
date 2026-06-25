@@ -208,11 +208,11 @@ async function writeAuditLog(
 // Set (Directory Folder) Operations
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function createSet(ownerId: string, payload: CreateSetPayload): Promise<SetSummary> {
+export async function createSet(ownerId: string, roomId: string, payload: CreateSetPayload): Promise<SetSummary> {
   if (payload.parentId) {
     const parent = await queryOne<{ id: string }>(
-      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-      [payload.parentId, ownerId]
+      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+      [payload.parentId, ownerId, roomId]
     );
     if (!parent) {
       throw new SetNotFoundError();
@@ -220,10 +220,10 @@ export async function createSet(ownerId: string, payload: CreateSetPayload): Pro
   }
 
   const set = await queryOne<SetRow>(
-    `INSERT INTO sets (name, parent_id, owner_id)
-     VALUES ($1, $2, $3)
+    `INSERT INTO sets (name, parent_id, owner_id, room_id)
+     VALUES ($1, $2, $3, $4)
      RETURNING *`,
-    [payload.name, payload.parentId ?? null, ownerId]
+    [payload.name, payload.parentId ?? null, ownerId, roomId]
   );
 
   await writeAuditLog("SET_CREATED", ownerId, set!.id, { name: set!.name });
@@ -234,13 +234,14 @@ export async function createSet(ownerId: string, payload: CreateSetPayload): Pro
 
 export async function updateSet(
   ownerId: string,
+  roomId: string,
   setId: string,
   payload: UpdateSetPayload
 ): Promise<SetSummary> {
   const existing = await queryOne<SetRow>(
     `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
-     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [setId, ownerId]
+     FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [setId, ownerId, roomId]
   );
   if (!existing) {
     throw new SetNotFoundError();
@@ -256,8 +257,8 @@ export async function updateSet(
       // Confirm target parent exists.
       const targetParent = await queryOne<SetRow>(
         `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
-         FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-        [payload.parentId, ownerId]
+         FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+        [payload.parentId, ownerId, roomId]
       );
       if (!targetParent) {
         throw new SetNotFoundError();
@@ -317,11 +318,11 @@ export async function updateSet(
  * Performs cascading soft-delete of a folder. Updates deleted_at on the folder,
  * all its descendants (subfolders), and all artifacts contained inside them.
  */
-export async function softDeleteSet(ownerId: string, setId: string): Promise<void> {
+export async function softDeleteSet(ownerId: string, roomId: string, setId: string): Promise<void> {
   const target = await queryOne<SetRow>(
     `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
-     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [setId, ownerId]
+     FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [setId, ownerId, roomId]
   );
   if (!target) {
     throw new SetNotFoundError();
@@ -373,6 +374,7 @@ export async function softDeleteSet(ownerId: string, setId: string): Promise<voi
 
 export async function getSets(
   ownerId: string,
+  roomId: string,
   parentId: string | null | "root",
   options: { limit?: number; offset?: number } = {}
 ): Promise<PaginatedResult<SetSummary>> {
@@ -382,8 +384,8 @@ export async function getSets(
 
   if (parentFilter !== null) {
     const parent = await queryOne<{ id: string }>(
-      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-      [parentFilter, ownerId]
+      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+      [parentFilter, ownerId, roomId]
     );
     if (!parent) {
       throw new SetNotFoundError();
@@ -394,18 +396,18 @@ export async function getSets(
     query<SetRow>(
       `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
        FROM sets
-       WHERE owner_id = $1 AND deleted_at IS NULL
-         AND parent_id IS NOT DISTINCT FROM $2
+       WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NULL
+         AND parent_id IS NOT DISTINCT FROM $3
        ORDER BY name ASC
-       LIMIT $3 OFFSET $4`,
-      [ownerId, parentFilter, limit, offset]
+       LIMIT $4 OFFSET $5`,
+      [ownerId, roomId, parentFilter, limit, offset]
     ),
     query<{ total: string }>(
       `SELECT COUNT(*) AS total
        FROM sets
-       WHERE owner_id = $1 AND deleted_at IS NULL
-         AND parent_id IS NOT DISTINCT FROM $2`,
-      [ownerId, parentFilter]
+       WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NULL
+         AND parent_id IS NOT DISTINCT FROM $3`,
+      [ownerId, roomId, parentFilter]
     ),
   ]);
 
@@ -425,11 +427,11 @@ export async function getSets(
  * Returns a folder with its immediate child sets and artifacts.
  * Does not recurse into nested subfolders (use parentId queries to navigate).
  */
-export async function getSetDetail(ownerId: string, setId: string): Promise<SetDetail> {
+export async function getSetDetail(ownerId: string, roomId: string, setId: string): Promise<SetDetail> {
   const set = await queryOne<SetRow>(
     `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
-     FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [setId, ownerId]
+     FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [setId, ownerId, roomId]
   );
   if (!set) {
     throw new SetNotFoundError();
@@ -439,17 +441,17 @@ export async function getSetDetail(ownerId: string, setId: string): Promise<SetD
     query<SetRow>(
       `SELECT id, name, parent_id, owner_id, created_at, updated_at, deleted_at
        FROM sets
-       WHERE parent_id = $1 AND owner_id = $2 AND deleted_at IS NULL
+       WHERE parent_id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL
        ORDER BY name ASC`,
-      [setId, ownerId]
+      [setId, ownerId, roomId]
     ),
     query<ArtifactRow>(
       `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
               created_at, updated_at, deleted_at
        FROM artifacts
-       WHERE set_id = $1 AND owner_id = $2 AND deleted_at IS NULL
+       WHERE set_id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL
        ORDER BY updated_at DESC`,
-      [setId, ownerId]
+      [setId, ownerId, roomId]
     ),
   ]);
 
@@ -466,12 +468,13 @@ export async function getSetDetail(ownerId: string, setId: string): Promise<SetD
 
 export async function createArtifact(
   ownerId: string,
+  roomId: string,
   payload: CreateArtifactPayload
 ): Promise<ArtifactDetail> {
   if (payload.setId) {
     const parentSet = await queryOne<{ id: string }>(
-      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-      [payload.setId, ownerId]
+      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+      [payload.setId, ownerId, roomId]
     );
     if (!parentSet) {
       throw new SetNotFoundError();
@@ -486,8 +489,8 @@ export async function createArtifact(
 
   return transaction(async (tx) => {
     const { rows: artifactRows } = await tx.query<ArtifactRow>(
-      `INSERT INTO artifacts (title, description, tags, type, visibility, owner_id, set_id)
-       VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)
+      `INSERT INTO artifacts (title, description, tags, type, visibility, owner_id, set_id, room_id)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         payload.title,
@@ -497,6 +500,7 @@ export async function createArtifact(
         payload.visibility ?? Visibility.PRIVATE,
         ownerId,
         payload.setId ?? null,
+        roomId,
       ]
     );
     const artifact = artifactRows[0];
@@ -544,14 +548,15 @@ export async function createArtifact(
 
 export async function updateArtifact(
   ownerId: string,
+  roomId: string,
   artifactId: string,
   payload: UpdateArtifactPayload
 ): Promise<ArtifactSummary> {
   const existing = await queryOne<ArtifactRow>(
     `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
             created_at, updated_at, deleted_at
-     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, ownerId]
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, ownerId, roomId]
   );
   if (!existing) {
     throw new ArtifactNotFoundError();
@@ -559,8 +564,8 @@ export async function updateArtifact(
 
   if (payload.setId !== undefined && payload.setId !== null) {
     const parentSet = await queryOne<{ id: string }>(
-      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-      [payload.setId, ownerId]
+      `SELECT id FROM sets WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+      [payload.setId, ownerId, roomId]
     );
     if (!parentSet) {
       throw new SetNotFoundError();
@@ -616,12 +621,12 @@ export async function updateArtifact(
   return toArtifactSummary(updated!);
 }
 
-export async function softDeleteArtifact(ownerId: string, artifactId: string): Promise<void> {
+export async function softDeleteArtifact(ownerId: string, roomId: string, artifactId: string): Promise<void> {
   const target = await queryOne<ArtifactRow>(
     `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
             created_at, updated_at, deleted_at
-     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, ownerId]
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, ownerId, roomId]
   );
   if (!target) {
     throw new ArtifactNotFoundError();
@@ -645,6 +650,7 @@ export async function softDeleteArtifact(ownerId: string, artifactId: string): P
 
 export async function getArtifacts(
   ownerId: string,
+  roomId: string,
   setId: string | null | "root",
   options: {
     tags?: string[];
@@ -660,9 +666,9 @@ export async function getArtifacts(
   const offset = options.offset ?? 0;
   const setFilter = setId === "root" ? null : setId;
 
-  const conditions: string[] = ["a.owner_id = $1", "a.deleted_at IS NULL"];
-  const params: unknown[] = [ownerId];
-  let i = 2;
+  const conditions: string[] = ["a.owner_id = $1", "a.room_id = $2", "a.deleted_at IS NULL"];
+  const params: unknown[] = [ownerId, roomId];
+  let i = 3;
 
   // setId === null means "all sets" (no set filter); otherwise scope to the set.
   if (setId !== null) {
@@ -732,6 +738,7 @@ export async function getArtifacts(
 
 export async function getArtifactDetails(
   userId: string,
+  roomId: string,
   artifactId: string,
   /** When true, also accept artifacts shared with this user (visibility SHARED/PUBLIC + share grant). */
   allowShared = false
@@ -739,8 +746,8 @@ export async function getArtifactDetails(
   let artifact = await queryOne<ArtifactRow>(
     `SELECT id, title, description, tags, type, visibility, owner_id, set_id,
             created_at, updated_at, deleted_at
-     FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, userId]
+     FROM artifacts WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, userId, roomId]
   );
 
   // If not the owner, try the shared/public read path.
@@ -786,12 +793,13 @@ export async function getArtifactDetails(
 /** Update the plain-text FTS content index for a TEXT artifact (best-effort). */
 export async function updateArtifactFtsContent(
   ownerId: string,
+  roomId: string,
   artifactId: string,
   plainText: string
 ): Promise<void> {
   await query(
-    `UPDATE artifacts SET fts_content = $1 WHERE id = $2 AND owner_id = $3 AND deleted_at IS NULL`,
-    [plainText || null, artifactId, ownerId]
+    `UPDATE artifacts SET fts_content = $1 WHERE id = $2 AND owner_id = $3 AND room_id = $4 AND deleted_at IS NULL`,
+    [plainText || null, artifactId, ownerId, roomId]
   );
 }
 
@@ -801,12 +809,13 @@ export async function updateArtifactFtsContent(
 
 export async function commitVersion(
   authorId: string,
+  roomId: string,
   artifactId: string,
   payload: CommitVersionPayload
 ): Promise<VersionDetail> {
   const artifact = await queryOne<{ id: string }>(
-    `SELECT id FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, authorId]
+    `SELECT id FROM artifacts WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, authorId, roomId]
   );
   if (!artifact) {
     throw new ArtifactNotFoundError();
@@ -874,12 +883,13 @@ export async function commitVersion(
  */
 export async function restoreVersion(
   authorId: string,
+  roomId: string,
   artifactId: string,
   versionNumber: number
 ): Promise<VersionDetail> {
   const artifact = await queryOne<{ id: string }>(
-    `SELECT id FROM artifacts WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
-    [artifactId, authorId]
+    `SELECT id FROM artifacts WHERE id = $1 AND owner_id = $2 AND room_id = $3 AND deleted_at IS NULL`,
+    [artifactId, authorId, roomId]
   );
   if (!artifact) {
     throw new ArtifactNotFoundError();

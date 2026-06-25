@@ -7,7 +7,7 @@ import {
   AlreadyMemberError,
 } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
-import { stampHasRoom } from "@/app/api/teams/route";
+import { stampSession } from "@/app/api/teams/route";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/teams/join
@@ -26,8 +26,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const membership = await joinRoom(session.userId, parsed.data.joinCode);
 
-    // Open the proxy gate for this user.
-    await stampHasRoom(session.userId);
+    // Open the proxy gate and set the newly joined room as active.
+    await stampSession(session.userId, membership.roomId);
 
     return NextResponse.json(ok(membership), { status: 201 });
   } catch (err) {

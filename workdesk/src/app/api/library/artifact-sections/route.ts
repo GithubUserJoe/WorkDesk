@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { getArtifactSections } from "@/modules/library/services/libraryService";
 
@@ -8,7 +8,7 @@ import { getArtifactSections } from "@/modules/library/services/libraryService";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    await requireRoomSession();
+    await requireActiveRoomSession();
     const artifactId = req.nextUrl.searchParams.get("artifactId");
     if (!artifactId)
       return NextResponse.json(fail("BAD_REQUEST", "artifactId is required."), { status: 400 });

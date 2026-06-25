@@ -396,6 +396,36 @@ export async function hasAnyRoom(userId: string): Promise<boolean> {
   return row?.exists ?? false;
 }
 
+// ── getFirstRoomId ────────────────────────────────────────────────────────────
+
+/**
+ * Returns the roomId of the user's earliest-joined room, or null if they have
+ * none. Used to auto-set activeRoomId in the session after login / onboarding.
+ */
+export async function getFirstRoomId(userId: string): Promise<string | null> {
+  const row = await queryOne<{ room_id: string }>(
+    `SELECT room_id FROM room_memberships WHERE user_id = $1 ORDER BY joined_at ASC LIMIT 1`,
+    [userId]
+  );
+  return row?.room_id ?? null;
+}
+
+// ── isMemberOfRoom ────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if userId is currently a member of roomId.
+ * Used by switch-team to validate the target room.
+ */
+export async function isMemberOfRoom(userId: string, roomId: string): Promise<boolean> {
+  const row = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM room_memberships WHERE room_id = $1 AND user_id = $2
+     ) AS exists`,
+    [roomId, userId]
+  );
+  return row?.exists ?? false;
+}
+
 // ── Mapper ────────────────────────────────────────────────────────────────────
 
 function mapMembershipRow(r: MembershipRow): RoomMembership {

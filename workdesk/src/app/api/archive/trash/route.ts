@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import {
   listTrash,
   restoreFromTrash,
@@ -18,18 +18,14 @@ import { ok, fail } from "@/types/common";
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
-    // Purge expired items first (lazy, non-blocking errors)
-    await purgeExpiredTrash(session.userId).catch((e) =>
-      console.error("[Trash] Purge error:", e)
-    );
-    const items = await listTrash(session.userId);
+    const session = await requireActiveRoomSession();
+    await purgeExpiredTrash(session.userId).catch((e) => console.error("[Trash] Purge error:", e));
+    const items = await listTrash(session.userId, session.activeRoomId);
     return NextResponse.json(ok(items));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    console.error("[GET /api/archive/trash] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    console.error("[GET /api/archive/trash]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }
@@ -42,7 +38,7 @@ export async function GET(): Promise<NextResponse> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function PUT(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const body = await req.json();
     const parsed = TrashActionSchema.safeParse({ ...body, action: "restore" });
     if (!parsed.success) {
@@ -51,26 +47,17 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     await restoreFromTrash(session.userId, parsed.data.kind, parsed.data.id);
     return NextResponse.json(ok({ restored: true }));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    if (err instanceof TrashItemNotFoundError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    }
-    console.error("[PUT /api/archive/trash] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof TrashItemNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    console.error("[PUT /api/archive/trash]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/archive/trash
-//
-// Permanently deletes a single artifact or set (with file GC for artifacts).
-// Query params: ?kind=artifact|set&id=uuid
-// ─────────────────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { searchParams } = req.nextUrl;
     const parsed = TrashActionSchema.safeParse({
       kind: searchParams.get("kind"),
@@ -83,13 +70,10 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     await permanentDelete(session.userId, parsed.data.kind, parsed.data.id);
     return NextResponse.json(ok({ deleted: true }));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
-    }
-    if (err instanceof TrashItemNotFoundError) {
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
-    }
-    console.error("[DELETE /api/archive/trash] Error:", err);
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof TrashItemNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    console.error("[DELETE /api/archive/trash]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
   }
 }

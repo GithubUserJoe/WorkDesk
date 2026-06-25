@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession } from "@/lib/session";
+import { requireActiveRoomSession } from "@/lib/session";
 import { getPresignedUploadUrl } from "@/lib/storage";
 import { buildArchiveContentKey } from "@/modules/archive/utils/contentKey";
 import { UploadQuerySchemaV2 } from "@/modules/archive/schemas";
@@ -15,7 +15,7 @@ import { ok, fail } from "@/types/common";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { searchParams } = req.nextUrl;
 
     const parsed = UploadQuerySchemaV2.safeParse({

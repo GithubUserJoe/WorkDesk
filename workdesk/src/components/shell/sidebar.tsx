@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
 import { Brand } from "@/components/brand";
 import { StorageUsageBar } from "@/components/shell/storage-usage-bar";
+import { TeamSwitcher } from "@/components/shell/team-switcher";
 import { useUnreadCount } from "@/modules/messaging/hooks";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 
@@ -68,8 +69,13 @@ export function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 z-50 flex h-screen w-sidebar-width flex-col border-r border-border-default bg-surface-secondary px-2 py-4">
       {/* Brand */}
-      <div className="mb-8 px-2">
+      <div className="mb-4 px-2">
         <Brand size={32} />
+      </div>
+
+      {/* Team Switcher */}
+      <div className="mb-4 px-1">
+        <TeamSwitcher />
       </div>
 
       {/* Nav */}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { query } from "@/lib/db";
 import { fail } from "@/types/common";
 
@@ -10,14 +10,15 @@ import { fail } from "@/types/common";
 //        member→root-set / member→orphan-artifact ("member-item").
 export async function GET(req: NextRequest) {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const userId = session.userId;
+    const roomId = session.activeRoomId;
     const teamView = req.nextUrl.searchParams.get("teamView") === "true";
 
     const [ownSets, ownArtifacts] = await Promise.all([
       query<{ id: string; name: string; parent_id: string | null; owner_id: string }>(
-        `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id = $1 AND deleted_at IS NULL`,
-        [userId]
+        `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NULL`,
+        [userId, roomId]
       ),
       query<{
         id: string; title: string; type: string;
@@ -29,8 +30,8 @@ export async function GET(req: NextRequest) {
          FROM artifacts a
          LEFT JOIN sets s ON s.id = a.set_id
          JOIN users u ON u.id = a.owner_id
-         WHERE a.owner_id = $1 AND a.deleted_at IS NULL`,
-        [userId]
+         WHERE a.owner_id = $1 AND a.room_id = $2 AND a.deleted_at IS NULL`,
+        [userId, roomId]
       ),
     ]);
 
@@ -46,10 +47,11 @@ export async function GET(req: NextRequest) {
          LEFT JOIN sets s ON s.id = a.set_id
          JOIN users u ON u.id = a.owner_id
          WHERE a.deleted_at IS NULL
+           AND a.room_id = $2
            AND a.owner_id <> $1
            AND a.visibility = 'PUBLIC'
            AND EXISTS (SELECT 1 FROM library_artifacts la WHERE la.artifact_id = a.id)`,
-        [userId]
+        [userId, roomId]
       );
 
       const teamOwnerIds = [...new Set(teamArtifacts.map(a => a.owner_id))];
@@ -146,8 +148,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ nodes, edges });
   } catch (err) {
-    if ((err as { name?: string }).name === "UnauthenticatedError")
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     console.error("[GET /api/graph]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Something went wrong."), { status: 500 });
   }

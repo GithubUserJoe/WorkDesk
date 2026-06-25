@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { SendMessageSchema } from "@/modules/messaging/schemas";
 import {
@@ -17,7 +17,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: conversationId } = await params;
     const body: unknown = await req.json();
     const parsed = SendMessageSchema.safeParse(body);
@@ -32,12 +32,8 @@ export async function POST(
     );
     return NextResponse.json(ok(message), { status: 201 });
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
-    if (err instanceof NotConversationMemberError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError || err instanceof NotConversationMemberError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
     console.error("[POST /api/messaging/conversations/[id]/messages]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "An unexpected error occurred."), { status: 500 });
   }

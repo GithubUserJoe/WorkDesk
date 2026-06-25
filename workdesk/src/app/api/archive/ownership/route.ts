@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession, requireRoomSession, UnauthenticatedError, ForbiddenError, NoRoomError } from "@/lib/session";
+import { requireAdminSession, UnauthenticatedError, ForbiddenError, NoRoomError } from "@/lib/session";
 import { transferOwnership, OwnershipTransferError } from "@/modules/archive/services/ownershipService";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";

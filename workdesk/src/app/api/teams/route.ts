@@ -7,6 +7,7 @@ import {
   createRoom,
   listMyRooms,
   hasAnyRoom,
+  getFirstRoomId,
 } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
 
@@ -45,8 +46,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const room = await createRoom(session.userId, parsed.data.name);
 
-    // Stamp hasRoom=true immediately so the proxy gate opens on the next request.
-    await stampHasRoom(session.userId);
+    // Stamp hasRoom=true and activeRoomId into the session so the proxy gate
+    // opens and the user lands directly in their new room.
+    await stampSession(session.userId, room.id);
 
     return NextResponse.json(ok(room), { status: 201 });
   } catch (err) {
@@ -58,14 +60,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// stampHasRoom — re-checks room membership and writes it into the session
-// cookie so the edge proxy gate reflects the current state without a DB call.
+// stampSession — re-checks room membership, updates hasRoom + activeRoomId.
+//
+// activeRoomId: if provided, stamp it directly (used after create/join/switch).
+//               If null, fall back to the user's first room (used after leave/delete).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function stampHasRoom(userId: string): Promise<void> {
+export async function stampSession(userId: string, activeRoomId?: string | null): Promise<void> {
   const cookieStore = await cookies();
   const session = await getIronSession<SessionData>(cookieStore, SESSION_OPTIONS);
   if (!session.isLoggedIn || !session.userId) return;
-  session.hasRoom = await hasAnyRoom(userId);
+
+  const hasRoom = await hasAnyRoom(userId);
+  session.hasRoom = hasRoom;
+
+  if (activeRoomId !== undefined) {
+    // Explicit: caller provided the new active room (or null to clear).
+    session.activeRoomId = activeRoomId;
+  } else if (!hasRoom) {
+    session.activeRoomId = null;
+  } else if (!session.activeRoomId) {
+    // No active room set yet — pick the first room.
+    session.activeRoomId = await getFirstRoomId(userId);
+  }
+  // Otherwise keep existing activeRoomId.
+
   await session.save();
+}
+
+/** @deprecated Use stampSession instead */
+export async function stampHasRoom(userId: string): Promise<void> {
+  return stampSession(userId);
 }

@@ -149,14 +149,12 @@ export async function getRelationships(userId: string, artifactId: string): Prom
 // The team-view toggle is always available regardless of how many personal
 // artifacts the user has.
 
-export async function getGraphData(userId: string, teamView = false): Promise<GraphData> {
-  // 1. All sets the user owns (always shown — personal archive)
+export async function getGraphData(userId: string, roomId: string, teamView = false): Promise<GraphData> {
   const ownSets = await query<{ id: string; name: string; parent_id: string | null; owner_id: string }>(
-    `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY name`,
-    [userId]
+    `SELECT id, name, parent_id, owner_id FROM sets WHERE owner_id = $1 AND room_id = $2 AND deleted_at IS NULL ORDER BY name`,
+    [userId, roomId]
   );
 
-  // 2a. User's own artifacts (always shown regardless of teamView)
   const ownArtifacts = await query<{
     id: string; title: string; type: string; visibility: string; tags: unknown;
     owner_id: string; owner_name: string; set_id: string | null;
@@ -164,9 +162,9 @@ export async function getGraphData(userId: string, teamView = false): Promise<Gr
     `SELECT a.id, a.title, a.type, a.visibility, a.tags, a.owner_id, u.name AS owner_name, a.set_id
      FROM artifacts a
      JOIN users u ON u.id = a.owner_id
-     WHERE a.deleted_at IS NULL AND a.owner_id = $1
+     WHERE a.deleted_at IS NULL AND a.owner_id = $1 AND a.room_id = $2
      ORDER BY a.title`,
-    [userId]
+    [userId, roomId]
   );
 
   // 2b. In team view: other members' PUBLIC library-published artifacts only.
@@ -183,11 +181,12 @@ export async function getGraphData(userId: string, teamView = false): Promise<Gr
        FROM artifacts a
        JOIN users u ON u.id = a.owner_id
        WHERE a.deleted_at IS NULL
+         AND a.room_id = $2
          AND a.owner_id <> $1
          AND a.visibility = 'PUBLIC'
          AND EXISTS (SELECT 1 FROM library_artifacts la WHERE la.artifact_id = a.id)
        ORDER BY a.title`,
-      [userId]
+      [userId, roomId]
     );
 
     const teamOwnerIds = [...new Set(teamArtifacts.map(a => a.owner_id))];

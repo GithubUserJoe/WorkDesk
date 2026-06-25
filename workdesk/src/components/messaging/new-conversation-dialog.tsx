@@ -17,10 +17,12 @@ export function NewConversationDialog({
   open,
   onClose,
   onCreated,
+  initialUserId,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
+  initialUserId?: string;
 }) {
   const { data: members = [] } = useQuery<MemberSummary[]>({
     queryKey: ["members"],
@@ -31,12 +33,12 @@ export function NewConversationDialog({
 
   const start = useStartConversation();
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialUserId ?? null);
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
-    setSearch(""); setSelectedId(null); setBody(""); setError(null);
+    setSearch(""); setSelectedId(initialUserId ?? null); setBody(""); setError(null);
   }
 
   function handleClose() { reset(); onClose(); }

@@ -9,7 +9,7 @@ import {
   NotMemberError,
 } from "@/modules/teams/services/teamService";
 import { ok, fail } from "@/types/common";
-import { stampHasRoom } from "@/app/api/teams/route";
+import { stampSession } from "@/app/api/teams/route";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/teams/[id]
@@ -54,7 +54,8 @@ export async function DELETE(
     await deleteRoom(session.userId, id);
 
     // Re-check — owner may now have zero rooms, which closes the gate.
-    await stampHasRoom(session.userId);
+    // activeRoomId will be cleared (null) if no rooms remain, or reset to next room.
+    await stampSession(session.userId);
 
     return NextResponse.json(ok(null));
   } catch (err) {

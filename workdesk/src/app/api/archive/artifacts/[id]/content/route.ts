@@ -2,7 +2,7 @@
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { commitVersion, getArtifactDetails, ArtifactNotFoundError, updateArtifactFtsContent } from "@/modules/archive/services/archiveService";
 import { ok, fail } from "@/types/common";
 import { z } from "zod";
@@ -35,11 +35,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: artifactId } = await params;
 
-    // allowShared=true: grantees can read text content too.
-    const artifact = await getArtifactDetails(session.userId, artifactId, true);
+    const artifact = await getArtifactDetails(session.userId, session.activeRoomId, artifactId, true);
     if (artifact.type !== "TEXT") {
       return NextResponse.json(fail("NOT_TEXT", "Content API is only available for TEXT artifacts."), { status: 400 });
     }
@@ -61,12 +60,9 @@ export async function GET(
     const content = await readTextContent(targetVersion.contentKey);
     return NextResponse.json(ok(content), { status: 200 });
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
-    if (err instanceof ArtifactNotFoundError)
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof ArtifactNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[GET /api/archive/artifacts/[id]/content]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "An unexpected error occurred."), { status: 500 });
   }
@@ -77,10 +73,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: artifactId } = await params;
 
-    const artifact = await getArtifactDetails(session.userId, artifactId);
+    const artifact = await getArtifactDetails(session.userId, session.activeRoomId, artifactId);
     if (artifact.type !== "TEXT") {
       return NextResponse.json(fail("NOT_TEXT", "Content API is only available for TEXT artifacts."), { status: 400 });
     }
@@ -95,26 +91,22 @@ export async function PUT(
 
     await writeTextContent(contentKey, jsonBytes);
 
-    const version = await commitVersion(session.userId, artifactId, {
+    const version = await commitVersion(session.userId, session.activeRoomId, artifactId, {
       contentKey,
       changeSummary: parsed.data.changeSummary ?? null,
       byteSize: jsonBytes.byteLength,
     });
 
-    // Update FTS index with plain text extracted from the document (best-effort).
     const plainText = extractPlainText(parsed.data.doc);
-    updateArtifactFtsContent(session.userId, artifactId, plainText).catch((e) =>
+    updateArtifactFtsContent(session.userId, session.activeRoomId, artifactId, plainText).catch((e) =>
       console.error("[content PUT] FTS update failed:", e)
     );
 
     return NextResponse.json(ok(version), { status: 201 });
   } catch (err) {
-    if (err instanceof NoRoomError)
-      return NextResponse.json(fail(err.code, err.message), { status: 403 });
-    if (err instanceof UnauthenticatedError)
-      return NextResponse.json(fail(err.code, err.message), { status: 401 });
-    if (err instanceof ArtifactNotFoundError)
-      return NextResponse.json(fail(err.code, err.message), { status: 404 });
+    if (err instanceof UnauthenticatedError) return NextResponse.json(fail(err.code, err.message), { status: 401 });
+    if (err instanceof NoRoomError || err instanceof NoActiveRoomError) return NextResponse.json(fail(err.code, err.message), { status: 403 });
+    if (err instanceof ArtifactNotFoundError) return NextResponse.json(fail(err.code, err.message), { status: 404 });
     console.error("[PUT /api/archive/artifacts/[id]/content]", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "An unexpected error occurred."), { status: 500 });
   }

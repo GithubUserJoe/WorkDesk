@@ -5,24 +5,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import type { SafeUser } from "@/modules/auth/types";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auth context — hydrates the current user from GET /api/auth/session.
-//
-// The session cookie is the source of truth (set by the login route). This hook
-// fetches the fresh DB-backed user so status/role changes (e.g. suspension) are
-// reflected without a re-login. A 401/403 simply means "not logged in".
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const SESSION_QUERY_KEY = ["auth", "session"] as const;
+
+interface SessionData {
+  user: SafeUser;
+  activeRoomId: string | null;
+}
 
 interface AuthContextValue {
   user: SafeUser | null;
+  activeRoomId: string | null;
   isLoading: boolean;
-  /** Prime the cache with a just-authenticated user (call right after login). */
   setUser: (user: SafeUser) => void;
-  /** Refetch the session (call after login). */
   refresh: () => Promise<void>;
-  /** Clear cached session (call after logout). */
   clear: () => void;
 }
 
@@ -31,13 +26,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery<SafeUser | null>({
+  const { data, isLoading } = useQuery<SessionData | null>({
     queryKey: SESSION_QUERY_KEY,
     queryFn: async () => {
       try {
-        return await api.get<SafeUser>("/api/auth/session");
+        return await api.get<SessionData>("/api/auth/session");
       } catch (err) {
-        // Unauthenticated / suspended → treat as "no user", not an error state.
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           return null;
         }
@@ -49,13 +43,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const value: AuthContextValue = {
-    user: data ?? null,
+    user: data?.user ?? null,
+    activeRoomId: data?.activeRoomId ?? null,
     isLoading,
     refresh: async () => {
       await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
     },
     setUser: (u: SafeUser) => {
-      queryClient.setQueryData(SESSION_QUERY_KEY, u);
+      queryClient.setQueryData(SESSION_QUERY_KEY, (prev: SessionData | null) =>
+        prev ? { ...prev, user: u } : { user: u, activeRoomId: null }
+      );
     },
     clear: () => {
       queryClient.setQueryData(SESSION_QUERY_KEY, null);

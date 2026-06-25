@@ -46,3 +46,7 @@ export interface EmitActivityPayload {
   setId?: string | null;
   details?: Record<string, unknown>;
 }
+
+export interface EmitActivityPayloadWithRoom extends EmitActivityPayload {
+  roomId: string;
+}

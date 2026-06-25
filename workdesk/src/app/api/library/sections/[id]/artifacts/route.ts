@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession, UnauthenticatedError, NoRoomError } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import { ok, fail } from "@/types/common";
 import { PublishArtifactSchema, UnpublishArtifactSchema } from "@/modules/library/schemas";
 import {
@@ -19,7 +19,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: sectionId } = await params;
     const body: unknown = await req.json();
     const parsed = PublishArtifactSchema.safeParse(body);
@@ -47,7 +47,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { id: sectionId } = await params;
     const body: unknown = await req.json();
     const parsed = UnpublishArtifactSchema.safeParse(body);

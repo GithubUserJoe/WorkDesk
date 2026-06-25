@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, requireRoomSession } from "@/lib/session";
+import { requireActiveRoomSession, UnauthenticatedError, NoRoomError, NoActiveRoomError } from "@/lib/session";
 import {
   starTarget,
   unstarTarget,
@@ -20,12 +20,12 @@ import { ok, fail } from "@/types/common";
 
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const starred = await listStarred(session.userId);
     return NextResponse.json(ok(starred));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
+    if (err instanceof UnauthenticatedError || err instanceof NoRoomError || err instanceof NoActiveRoomError) {
+      return NextResponse.json(fail((err as { code: string }).code, err.message), { status: err instanceof UnauthenticatedError ? 401 : 403 });
     }
     console.error("[GET /api/archive/stars] Error:", err);
     return NextResponse.json(fail("INTERNAL_ERROR", "Internal server error occurred."), { status: 500 });
@@ -41,7 +41,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const body = await req.json();
 
     const parsed = ToggleStarSchema.safeParse(body);
@@ -52,8 +52,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const star = await starTarget(session.userId, parsed.data.targetType, parsed.data.targetId);
     return NextResponse.json(ok(star), { status: 201 });
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
+    if (err instanceof UnauthenticatedError || err instanceof NoRoomError || err instanceof NoActiveRoomError) {
+      return NextResponse.json(fail((err as { code: string }).code, err.message), { status: err instanceof UnauthenticatedError ? 401 : 403 });
     }
     if (err instanceof StarTargetNotFoundError) {
       return NextResponse.json(fail(err.code, err.message), { status: 404 });
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await requireRoomSession();
+    const session = await requireActiveRoomSession();
     const { searchParams } = req.nextUrl;
 
     const parsed = StarQuerySchema.safeParse({
@@ -91,8 +91,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     await unstarTarget(session.userId, parsed.data.targetType, parsed.data.targetId);
     return NextResponse.json(ok({ message: "Unstarred successfully." }));
   } catch (err) {
-    if (err instanceof Error && err.name === "UnauthenticatedError") {
-      return NextResponse.json(fail("UNAUTHENTICATED", "Authentication required."), { status: 401 });
+    if (err instanceof UnauthenticatedError || err instanceof NoRoomError || err instanceof NoActiveRoomError) {
+      return NextResponse.json(fail((err as { code: string }).code, err.message), { status: err instanceof UnauthenticatedError ? 401 : 403 });
     }
     if (err instanceof NotStarredError) {
       return NextResponse.json(fail(err.code, err.message), { status: 404 });

@@ -43,7 +43,7 @@ async function readSession(req: NextRequest): Promise<Partial<SessionData>> {
 const ROOM_EXEMPT_PAGES = ["/onboarding", "/teams"];
 
 // API prefixes that need auth but NOT a room check.
-const ROOM_EXEMPT_API_PREFIXES = ["/api/teams", "/api/auth/refresh-room"];
+const ROOM_EXEMPT_API_PREFIXES = ["/api/teams", "/api/auth/refresh-room", "/api/auth/switch-team"];
 
 // Routes that require auth + room.
 const PROTECTED_PREFIXES = [
@@ -70,9 +70,10 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   const res = NextResponse.next();
   const session = await readSession(req);
 
-  const isLoggedIn = session.isLoggedIn === true && Boolean(session.userId);
-  const isAdmin    = isLoggedIn && session.role === "ADMIN";
-  const hasRoom    = isLoggedIn && session.hasRoom === true;
+  const isLoggedIn    = session.isLoggedIn === true && Boolean(session.userId);
+  const isAdmin       = isLoggedIn && session.role === "ADMIN";
+  const hasRoom       = isLoggedIn && session.hasRoom === true;
+  const hasActiveRoom = isLoggedIn && Boolean(session.activeRoomId);
 
   // ── Rule 1: Admin-only pages ───────────────────────────────────────────────
   if (ADMIN_ONLY_PREFIXES.some(p => pathname.startsWith(p))) {
@@ -99,19 +100,20 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
     return res;
   }
 
-  // ── Rule 3: Protected routes (auth + room required) ────────────────────────
+  // ── Rule 3: Protected routes (auth + room + active room required) ────────────
   if (PROTECTED_PREFIXES.some(p => pathname.startsWith(p))) {
-    if (!isLoggedIn) return redirectToLogin(req);
-    if (!hasRoom)    return NextResponse.redirect(new URL("/onboarding", req.url));
+    if (!isLoggedIn)    return redirectToLogin(req);
+    if (!hasRoom)       return NextResponse.redirect(new URL("/onboarding", req.url));
+    if (!hasActiveRoom) return NextResponse.redirect(new URL("/onboarding", req.url));
     return res;
   }
 
   // ── Rule 4: Auth routes (redirect away if already logged in) ──────────────
   if (AUTH_ROUTES.some(r => pathname.startsWith(r))) {
     if (isLoggedIn) {
-      // Logged in but no room → onboarding; logged in with room → dashboard.
+      // Logged in but no room or no active room → onboarding; otherwise → dashboard.
       return NextResponse.redirect(
-        new URL(hasRoom ? "/dashboard" : "/onboarding", req.url)
+        new URL((hasRoom && hasActiveRoom) ? "/dashboard" : "/onboarding", req.url)
       );
     }
     return res;

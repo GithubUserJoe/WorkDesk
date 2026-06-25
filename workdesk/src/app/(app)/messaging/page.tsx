@@ -11,6 +11,8 @@ import {
   useSendMessage,
 } from "@/modules/messaging/hooks";
 import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
 import type { MessageItem } from "@/modules/messaging/types";
 import Link from "next/link";
 
@@ -29,6 +31,60 @@ function fmtRelative(d: Date | string | null): string {
   return new Date(d).toLocaleDateString(undefined, { dateStyle: "short" });
 }
 
+// ── Member summary type ───────────────────────────────────────────────────────
+
+interface MemberSummary { id: string; name: string; email: string; }
+
+// ── Team Members pane ─────────────────────────────────────────────────────────
+
+function MembersPane({
+  onOpenConversation,
+}: {
+  onOpenConversation: (id: string) => void;
+}) {
+  const [composeTo, setComposeTo] = useState<string | null>(null);
+  const { data: members, isLoading, error } = useQuery<MemberSummary[]>({
+    queryKey: ["members", "team"],
+    queryFn: () => api.get<MemberSummary[]>("/api/members"),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) return <div className="p-4"><LoadingState label="Loading members…" /></div>;
+  if (error) return <div className="p-4"><ErrorState message="Failed to load team members." /></div>;
+  if (!members?.length) return <div className="p-4"><EmptyState title="No other members" hint="Invite teammates to your room." /></div>;
+
+  return (
+    <>
+      <div className="flex-1 overflow-y-auto">
+        {members.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setComposeTo(m.id)}
+            className="w-full text-left px-4 py-3 border-b border-border-default transition-colors hover:bg-surface-container"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-container-high text-sm font-semibold text-text-primary">
+                {m.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-text-primary">{m.name}</p>
+                <p className="truncate text-xs text-text-secondary">{m.email}</p>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+      <NewConversationDialog
+        open={composeTo !== null}
+        initialUserId={composeTo ?? undefined}
+        onClose={() => setComposeTo(null)}
+        onCreated={(id) => { setComposeTo(null); onOpenConversation(id); }}
+      />
+    </>
+  );
+}
+
 // ── Conversation list pane ────────────────────────────────────────────────────
 
 function ConversationList({
@@ -40,6 +96,7 @@ function ConversationList({
   onSelect: (id: string) => void;
   onCompose: () => void;
 }) {
+  const [tab, setTab] = useState<"messages" | "members">("messages");
   const { data: convosPage, isLoading, error } = useConversations();
   const convos = convosPage?.items;
 
@@ -47,50 +104,75 @@ function ConversationList({
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-border-default">
       <div className="flex items-center justify-between border-b border-border-default px-4 py-3">
         <h2 className="font-semibold text-text-primary">Messages</h2>
-        <Button variant="secondary" className="h-7 text-xs" onClick={onCompose}>
-          Compose
-        </Button>
+        {tab === "messages" && (
+          <Button variant="secondary" className="h-7 text-xs" onClick={onCompose}>
+            Compose
+          </Button>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {isLoading && <div className="p-4"><LoadingState label="Loading…" /></div>}
-        {error && <div className="p-4"><ErrorState message="Failed to load." /></div>}
-        {!isLoading && !error && convos?.length === 0 && (
-          <div className="p-4">
-            <EmptyState title="No conversations yet" hint="Compose a message to get started." />
-          </div>
-        )}
-        {convos?.map((c) => (
+      {/* Tabs */}
+      <div className="flex border-b border-border-default">
+        {(["messages", "members"] as const).map((t) => (
           <button
-            key={c.id}
+            key={t}
             type="button"
-            onClick={() => onSelect(c.id)}
+            onClick={() => setTab(t)}
             className={
-              "w-full text-left px-4 py-3 border-b border-border-default transition-colors hover:bg-surface-container " +
-              (activeId === c.id ? "bg-surface-container-high" : "")
+              "flex-1 py-2 text-xs font-medium transition-colors " +
+              (tab === t
+                ? "border-b-2 border-primary text-primary"
+                : "text-text-secondary hover:text-text-primary")
             }
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium text-text-primary">
-                {c.otherUserName}
-              </span>
-              <span className="shrink-0 text-xs text-text-secondary">
-                {fmtRelative(c.lastMessageAt)}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="truncate text-xs text-text-secondary flex-1">
-                {c.lastMessage ?? "No messages yet"}
-              </span>
-              {c.unreadCount > 0 && (
-                <span className="shrink-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
-                  {c.unreadCount > 99 ? "99+" : c.unreadCount}
-                </span>
-              )}
-            </div>
+            {t === "messages" ? "Chats" : "Team"}
           </button>
         ))}
       </div>
+
+      {tab === "messages" ? (
+        <div className="flex-1 overflow-y-auto">
+          {isLoading && <div className="p-4"><LoadingState label="Loading…" /></div>}
+          {error && <div className="p-4"><ErrorState message="Failed to load." /></div>}
+          {!isLoading && !error && convos?.length === 0 && (
+            <div className="p-4">
+              <EmptyState title="No conversations yet" hint="Compose a message to get started." />
+            </div>
+          )}
+          {convos?.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onSelect(c.id)}
+              className={
+                "w-full text-left px-4 py-3 border-b border-border-default transition-colors hover:bg-surface-container " +
+                (activeId === c.id ? "bg-surface-container-high" : "")
+              }
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-medium text-text-primary">
+                  {c.otherUserName}
+                </span>
+                <span className="shrink-0 text-xs text-text-secondary">
+                  {fmtRelative(c.lastMessageAt)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="truncate text-xs text-text-secondary flex-1">
+                  {c.lastMessage ?? "No messages yet"}
+                </span>
+                {c.unreadCount > 0 && (
+                  <span className="shrink-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
+                    {c.unreadCount > 99 ? "99+" : c.unreadCount}
+                  </span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <MembersPane onOpenConversation={onSelect} />
+      )}
     </aside>
   );
 }

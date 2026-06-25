@@ -23,6 +23,11 @@ export class UserNotFoundError extends Error {
   constructor() { super("User not found."); this.name = "UserNotFoundError"; }
 }
 
+export class UserNotInRoomError extends Error {
+  readonly code = "USER_NOT_IN_ROOM";
+  constructor() { super("You can only message members of your active team."); this.name = "UserNotInRoomError"; }
+}
+
 // ── Row shapes ────────────────────────────────────────────────────────────────
 
 interface ConvRow {
@@ -68,8 +73,22 @@ function rowToMessage(r: MsgRow): MessageItem {
 
 export async function getOrCreateConversation(
   userA: string,
+  roomId: string,
   userB: string
 ): Promise<string> {
+  // Verify userB exists, is active, and is in the same room.
+  const other = await queryOne<{ id: string }>(
+    `SELECT id FROM users WHERE id = $1 AND status = 'ACTIVE'`,
+    [userB]
+  );
+  if (!other) throw new UserNotFoundError();
+
+  const inRoom = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM room_memberships WHERE room_id = $1 AND user_id = $2) AS exists`,
+    [roomId, userB]
+  );
+  if (!inRoom?.exists) throw new UserNotInRoomError();
+
   // Find an existing 1:1 conversation between exactly these two users.
   const existing = await queryOne<{ id: string }>(
     `SELECT c.id
@@ -81,13 +100,6 @@ export async function getOrCreateConversation(
     [userA, userB]
   );
   if (existing) return existing.id;
-
-  // Verify userB exists and is active.
-  const other = await queryOne<{ id: string }>(
-    `SELECT id FROM users WHERE id = $1 AND status = 'ACTIVE'`,
-    [userB]
-  );
-  if (!other) throw new UserNotFoundError();
 
   return transaction(async (tx) => {
     const { rows } = await tx.query<{ id: string }>(
@@ -106,6 +118,7 @@ export async function getOrCreateConversation(
 
 export async function listConversations(
   userId: string,
+  roomId: string,
   options: { limit?: number; offset?: number } = {}
 ): Promise<PaginatedResult<ConversationSummary>> {
   const limit  = Math.min(options.limit  ?? 50, 200);
@@ -128,15 +141,23 @@ export async function listConversations(
        JOIN conversation_members me    ON me.conversation_id = c.id AND me.user_id = $1
        JOIN conversation_members other ON other.conversation_id = c.id AND other.user_id <> $1
        JOIN users other_u              ON other_u.id = other.user_id
+       WHERE EXISTS (
+         SELECT 1 FROM room_memberships rm WHERE rm.room_id = $4 AND rm.user_id = other_u.id
+       )
        ORDER BY c.updated_at DESC
        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+      [userId, limit, offset, roomId]
     ),
     query<{ total: string }>(
       `SELECT COUNT(*) AS total
        FROM conversations c
-       JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1`,
-      [userId]
+       JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1
+       JOIN conversation_members other ON other.conversation_id = c.id AND other.user_id <> $1
+       JOIN users other_u ON other_u.id = other.user_id
+       WHERE EXISTS (
+         SELECT 1 FROM room_memberships rm WHERE rm.room_id = $2 AND rm.user_id = other_u.id
+       )`,
+      [userId, roomId]
     ),
   ]);
 
